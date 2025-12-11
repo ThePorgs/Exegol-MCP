@@ -12,3 +12,6 @@ class ContainerInfo(TypedDict):
     network_driver: Optional[str]
     network_name: Optional[str]
 
+class ExecutionResult(BaseModel):
+    exit_code: int
+    output: str
