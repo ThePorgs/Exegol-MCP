@@ -1,0 +1,28 @@
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "exegol-mcp"
+version = "0.1.0a1"
+description = "MCP server for Exegol"
+authors = [
+    { name = "Dramelac", email = "dramelac@pm.me" },
+    { name = "Elliot Belt", email = "felix.billieres1@gmail.com" },
+]
+license = { file = "LICENSE.md" }
+readme = { file = "README.md", content-type = "text/markdown" }
+
+keywords = ["exegol", "mcp", "ctf"]
+
+requires-python = ">=3.12"
+dependencies = [
+    "exegol>=5.1.7",
+    "mcp>=1.23.3",
+]
+
+[project.urls]
+Homepage = "https://exegol.com"
+Documentation = "https://docs.exegol.com"
+Repository = "https://github.com/ThePorgs/Exegol"
+Issues = "https://github.com/ThePorgs/Exegol/issues"
