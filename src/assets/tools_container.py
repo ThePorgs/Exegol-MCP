@@ -10,13 +10,13 @@ from src.models.container import ExecutionResult
 async def start_container(
         container_name: str,
         ctx: Context[ServerSession, None]
-) -> str:
+) -> bool:
     """
     Start an Exegol container if it is not running yet.
     Args:
         container_name: Name of the container
     Returns:
-        Command output (stdout + stderr)
+        return true if the container is running
     """
     await ctx.info(f"Starting container {container_name}")
 
@@ -28,10 +28,7 @@ async def start_container(
     if not container.isRunning():
         await container.start()
 
-    if container.isRunning():
-        return "Container started successfully"
-    else:
-        return "Container failed to start"
+    return container.isRunning()
 
 @mcp_server.tool()
 async def execute_command_in_container(
@@ -45,7 +42,8 @@ async def execute_command_in_container(
         container_name: Name of the container
         command: Command to execute
     Returns:
-        Command output (stdout + stderr)
+        exit_code: Exit code of the command
+        output: Command output (stdout + stderr)
     """
     await ctx.info(f"Executing command '{command}' in container {container_name}")
 
