@@ -2,7 +2,7 @@ from typing import List
 
 from mcp.server.fastmcp import Context
 
-from src.exegol_utils import get_exegol_container, is_exegol_ready
+from src.exegol_utils import get_exegol_container, check_exegol_readiness
 from src.mcp_app import mcp_server
 from src.models.container import ContainerInfo
 
@@ -17,6 +17,5 @@ async def list_exegol_containers(ctx: Context) -> List[ContainerInfo]:
             RuntimeError: If Exegol is not ready or configured
     """
     await ctx.info("Starting action: Listing Exegol containers")
-    if is_exegol_ready():
-        await ctx.error("Exegol is not ready yet. Please run exegol first with `exegol info` and make sure it works.")
+    check_exegol_readiness(ctx)
     return await get_exegol_container()

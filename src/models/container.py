@@ -3,7 +3,7 @@ from typing import List, Optional, TypedDict
 from pydantic import BaseModel, Field
 
 
-class ContainerInfo(TypedDict):
+class ContainerInfo(BaseModel):
     """Container information from Exegol SDK"""
     name: str
     creation_date: str

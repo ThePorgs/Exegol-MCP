@@ -7,9 +7,11 @@ from exegol.utils.DockerUtils import DockerUtils
 
 from src.models.container import ContainerInfo
 
-def is_exegol_ready() -> bool:
+def check_exegol_readiness(ctx) -> bool:
     # TODO add check if exegol is ready
     return True
+    #await ctx.error("Exegol is not ready yet. Please run exegol first with `exegol info` and make sure it works.")
+    #raise RuntimeError("Exegol is not ready yet, user action required.")
 
 async def get_exegol_container() -> List[ContainerInfo]:
     containers: List[ExegolContainer] = await DockerUtils().listContainers()
@@ -52,7 +54,7 @@ async def get_exegol_container() -> List[ContainerInfo]:
         ))
     return results
 
-async def get_container_by_name(name: str) -> Optional[ExegolContainer]:
+def get_container_by_name(name: str) -> Optional[ExegolContainer]:
     """
     Get an Exegol container by its name.
     Args:
