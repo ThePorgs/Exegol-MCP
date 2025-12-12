@@ -1,11 +1,17 @@
+from exegol.utils.ExeLog import logger
+
 from src.assets import *
 from src.mcp_app import mcp_host, mcp_port
 
 __version__ = "0.0.1a1"
 
+def patch_critical_loggers():
+    """Update exegol logger to raise exceptions instead of exit."""
+    logger.setCriticalMethod("raise")
 
 def main():
     print(f"Starting exegol-mcp v{__version__} !")
+    patch_critical_loggers()
     # TODO
     #  - authentification (server / client)
     #  - add tools for orchestrator
