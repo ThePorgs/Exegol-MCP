@@ -7,19 +7,34 @@ from exegol.utils.DockerUtils import DockerUtils
 
 from src.models.container import ContainerInfo
 
-def check_exegol_readiness(ctx) -> bool:
+async def check_exegol_readiness(ctx) -> bool:
     """
     Check if Exegol is ready and DockerUtils can be used.
+    Verifies that Docker/Exegol is available by attempting to instantiate DockerUtils.
     Raises RuntimeError if Exegol is not ready.
+    
+    Args:
+        ctx: MCP context for logging
+    Returns:
+        True if Exegol is ready
+    Raises:
+        RuntimeError: If Exegol/Docker is not available or not properly configured
     """
     try:
         # Try to instantiate DockerUtils to verify Exegol/Docker is available
-        docker_utils = DockerUtils()
+        # This will fail if Docker is not running, not installed, or if Exegol is not properly configured
+        _ = DockerUtils()  # Instantiating to verify availability
         # If instantiation succeeds, Exegol is ready
+        await ctx.info("Exegol readiness check passed")
         return True
     except Exception as e:
         # If any exception occurs, Exegol is not ready
-        error_msg = f"Exegol is not ready yet. Please run exegol first with `exegol info` and make sure it works. Error: {str(e)}"
+        # Common causes: Docker not running, Docker not installed, Exegol not configured
+        error_msg = (
+            f"Exegol is not ready yet. Please run exegol first with `exegol info` "
+            f"and make sure it works. Error: {str(e)}"
+        )
+        await ctx.error(error_msg)
         raise RuntimeError(error_msg) from e
 
 async def get_exegol_container() -> List[ContainerInfo]:

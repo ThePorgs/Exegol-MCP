@@ -9,7 +9,7 @@ def main():
     # TODO
     #  - authentification (server / client)
     #  - add tools for orchestrator
-    #  - add tools for container
+    #  - add tools for container (✅ DONE: start_container, stop_container, execute_command_in_container)
 
     print("MCP client template:")
     print("========================================================")

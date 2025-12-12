@@ -17,5 +17,5 @@ async def list_exegol_containers(ctx: Context) -> List[ContainerInfo]:
             RuntimeError: If Exegol is not ready or configured
     """
     await ctx.info("Starting action: Listing Exegol containers")
-    check_exegol_readiness(ctx)
+    await check_exegol_readiness(ctx)
     return await get_exegol_container()

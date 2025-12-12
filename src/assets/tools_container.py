@@ -18,7 +18,7 @@ async def start_container(
         return true if the container is running
     """
     await ctx.info(f"Starting container {container_name}")
-    check_exegol_readiness(ctx)
+    await check_exegol_readiness(ctx)
 
     # 1. Check if container exists
     container = get_container_by_name(container_name)
@@ -44,7 +44,7 @@ async def stop_container(
         return true if the container is stopped
     """
     await ctx.info(f"Stopping container {container_name}")
-    check_exegol_readiness(ctx)
+    await check_exegol_readiness(ctx)
 
     # 1. Check if container exists
     container = get_container_by_name(container_name)
@@ -73,7 +73,7 @@ async def execute_command_in_container(
         output: Command output (stdout + stderr)
     """
     await ctx.info(f"Executing command '{command}' in container {container_name}")
-    check_exegol_readiness(ctx)
+    await check_exegol_readiness(ctx)
 
     # 1. Check if container exists
     container = get_container_by_name(container_name)
@@ -83,12 +83,42 @@ async def execute_command_in_container(
 
     # 2. Check if container is running
     if not container.isRunning():
-        error_msg = (
-            f"Container '{container_name}' is not running. "
-            f"Please start it first using the 'start_container' tool."
-        )
-        await ctx.error(error_msg)
-        raise RuntimeError(error_msg)
+        # Use elicitation to ask user if they want to start the container
+        try:
+            response = await ctx.elicit(
+                mode="form",
+                message=f"Container '{container_name}' is not running. Would you like to start it now?",
+                requested_schema={
+                    "type": "object",
+                    "properties": {
+                        "start_container": {
+                            "type": "boolean",
+                            "title": "Start Container",
+                            "description": f"Start the container '{container_name}' before executing the command",
+                            "default": True
+                        }
+                    },
+                    "required": ["start_container"]
+                }
+            )
+            
+            if response.get("start_container", False):
+                await ctx.info(f"Starting container {container_name} as requested")
+                await container.start()
+                if not container.isRunning():
+                    raise RuntimeError(f"Failed to start container '{container_name}'")
+            else:
+                error_msg = f"Container '{container_name}' is not running and user declined to start it"
+                await ctx.error(error_msg)
+                raise RuntimeError(error_msg)
+        except AttributeError:
+            # Fallback if elicitation is not supported by the client
+            error_msg = (
+                f"Container '{container_name}' is not running. "
+                f"Please start it first using the 'start_container' tool."
+            )
+            await ctx.error(error_msg)
+            raise RuntimeError(error_msg)
 
     # 3. Execute the command
     exit_code, result = await container.exec_raw(command)
