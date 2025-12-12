@@ -8,10 +8,19 @@ from exegol.utils.DockerUtils import DockerUtils
 from src.models.container import ContainerInfo
 
 def check_exegol_readiness(ctx) -> bool:
-    # TODO add check if exegol is ready
-    return True
-    #await ctx.error("Exegol is not ready yet. Please run exegol first with `exegol info` and make sure it works.")
-    #raise RuntimeError("Exegol is not ready yet, user action required.")
+    """
+    Check if Exegol is ready and DockerUtils can be used.
+    Raises RuntimeError if Exegol is not ready.
+    """
+    try:
+        # Try to instantiate DockerUtils to verify Exegol/Docker is available
+        docker_utils = DockerUtils()
+        # If instantiation succeeds, Exegol is ready
+        return True
+    except Exception as e:
+        # If any exception occurs, Exegol is not ready
+        error_msg = f"Exegol is not ready yet. Please run exegol first with `exegol info` and make sure it works. Error: {str(e)}"
+        raise RuntimeError(error_msg) from e
 
 async def get_exegol_container() -> List[ContainerInfo]:
     containers: List[ExegolContainer] = await DockerUtils().listContainers()

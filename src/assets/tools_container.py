@@ -32,6 +32,32 @@ async def start_container(
     return container.isRunning()
 
 @mcp_server.tool()
+async def stop_container(
+        container_name: str,
+        ctx: Context
+) -> bool:
+    """
+    Stop an Exegol container if it is running.
+    Args:
+        container_name: Name of the container
+    Returns:
+        return true if the container is stopped
+    """
+    await ctx.info(f"Stopping container {container_name}")
+    check_exegol_readiness(ctx)
+
+    # 1. Check if container exists
+    container = get_container_by_name(container_name)
+    if not container:
+        await ctx.error(f"Container '{container_name}' not found")
+        raise ValueError(f"Container '{container_name}' not found")
+
+    if container.isRunning():
+        await container.stop()
+
+    return not container.isRunning()
+
+@mcp_server.tool()
 async def execute_command_in_container(
         container_name: str,
         command: str,
@@ -57,9 +83,12 @@ async def execute_command_in_container(
 
     # 2. Check if container is running
     if not container.isRunning():
-        # TODO add elicit when supported by clients
-        await ctx.error(f"Container '{container_name}' is not running")
-        raise RuntimeError(f"Container '{container_name}' is not running")
+        error_msg = (
+            f"Container '{container_name}' is not running. "
+            f"Please start it first using the 'start_container' tool."
+        )
+        await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
 
     # 3. Execute the command
     exit_code, result = await container.exec_raw(command)
