@@ -33,3 +33,13 @@ exegol-mcp = "src.main:main"
 [tool.uv.build-backend]
 module-name = "src"
 module-root = "."
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.25.0",
+    "asgi-lifespan>=2.1.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
