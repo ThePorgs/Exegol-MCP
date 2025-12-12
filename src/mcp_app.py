@@ -6,6 +6,6 @@ mcp_server = FastMCP(
     "Exegol",
     host=mcp_host,
     port=mcp_port,
-    stateless_http=True,
+    stateless_http=False,
     json_response=True
 )

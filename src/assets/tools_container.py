@@ -3,6 +3,8 @@ from mcp.server.fastmcp import Context
 from src.exegol_utils import get_container_by_name, check_exegol_readiness
 from src.mcp_app import mcp_server
 from src.models.container import ExecutionResult
+from src.models.elicit_forms import UserConfirmation
+from src.utils.client_checks import is_elicitation_form_supported
 
 
 @mcp_server.tool()
@@ -31,12 +33,27 @@ async def execute_command_in_container(
 
     # 2. Check if container is running
     if not container.isRunning():
-        error_msg = (
-            f"Container '{container_name}' is not running. "
-            f"Please start it first using the 'start_container' tool."
-        )
-        await ctx.error(error_msg)
-        raise RuntimeError(error_msg)
+        if is_elicitation_form_supported(ctx):
+            # TODO to test in a client that supports elicitation
+            result = await ctx.elicit(
+                message=f"Container '{container_name}' is not running. Do you want to start it?",
+                schema=UserConfirmation)
+            if result.action == "accept" and result.data:
+                if result.data.confirmation:
+                    await container.start()
+            else:
+                error_msg = f"Container '{container_name}' is not running and user declined to start it"
+                await ctx.error(error_msg)
+                raise RuntimeError(error_msg)
+            if not container.isRunning():
+                raise RuntimeError(f"Failed to start container '{container_name}'")
+        else:
+            error_msg = (
+                f"Container '{container_name}' is not running. "
+                f"Please start it first using the 'start_container' tool."
+            )
+            await ctx.error(error_msg)
+            raise RuntimeError(error_msg)
 
     # 3. Execute the command
     exit_code, result = await container.exec_raw(command)
