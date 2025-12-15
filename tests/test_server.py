@@ -10,6 +10,8 @@ EXPECTED_TOOLS = [
     "stop_container",
     "execute_command_in_container",
     "list_exegol_containers",
+    "list_installed_tools",
+    "get_tool_help",
 ]
 
 
