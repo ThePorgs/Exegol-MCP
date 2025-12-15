@@ -49,7 +49,7 @@ async def list_installed_tools(
     Args:
         container_name: Name of the Exegol container
     Returns:
-        List of installed tools with their information (name, category, description, version)
+        List of installed tools with their information (name, category, description)
     """
     await ctx.info(f"Listing installed tools in container {container_name}")
     await check_exegol_readiness(ctx)
@@ -63,10 +63,9 @@ async def list_installed_tools(
     
     for row in csv_reader:
         tool = InstalledTool(
-            name=row.get('name', row.get('tool', '')).strip(),
+            name=row.get('name', row.get('Tool', row.get('tool', ''))).strip(),
             category=row.get('category', row.get('Category', '')).strip() or None,
-            description=row.get('description', row.get('Description', '')).strip() or None,
-            version=row.get('version', row.get('Version', '')).strip() or None
+            description=row.get('description', row.get('Description', '')).strip() or None
         )
         tools.append(tool)
 

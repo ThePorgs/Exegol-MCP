@@ -30,4 +30,3 @@ class InstalledTool(BaseModel):
     name: str = Field(description="Name of the tool")
     category: Optional[str] = Field(default=None, description="Category of the tool")
     description: Optional[str] = Field(default=None, description="Description of the tool")
-    version: Optional[str] = Field(default=None, description="Version of the tool")
