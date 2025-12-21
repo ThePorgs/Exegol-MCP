@@ -7,5 +7,6 @@ mcp_server = FastMCP(
     host=mcp_host,
     port=mcp_port,
     stateless_http=False,
-    json_response=True
+    json_response=True,
+    website_url="https://exegol.com"
 )

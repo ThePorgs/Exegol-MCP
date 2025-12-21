@@ -1,12 +1,12 @@
 import csv
 import io
-from typing import List, Optional
+from typing import List
 
 from mcp.server.fastmcp import Context
 
-from src.exegol_utils import get_container_by_name, check_exegol_readiness
-from src.mcp_app import mcp_server
-from src.models.container import InstalledTool, ExecutionResult
+from exegol_mcp.utils.exegol_utils import get_container_by_name, check_exegol_readiness
+from exegol_mcp.mcp_app import mcp_server
+from exegol_mcp.models.container import InstalledTool, ExecutionResult
 
 
 async def _read_installed_tools_csv(container_name: str, ctx: Context) -> str:

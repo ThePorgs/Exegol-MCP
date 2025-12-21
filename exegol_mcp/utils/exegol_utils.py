@@ -3,9 +3,12 @@ from typing import List, Optional
 
 from exegol.exceptions.ExegolExceptions import ObjectNotFound
 from exegol.model.ExegolContainer import ExegolContainer
+from exegol.model.ExegolImage import ExegolImage
 from exegol.utils.DockerUtils import DockerUtils
 
-from src.models.container import ContainerInfo
+from exegol_mcp.models.container import ContainerInfo
+from exegol_mcp.models.image import ImageInfo
+
 
 async def check_exegol_readiness(ctx) -> bool:
     """
@@ -90,3 +93,22 @@ def get_container_by_name(name: str) -> Optional[ExegolContainer]:
         return DockerUtils().getContainer(name)
     except ObjectNotFound:
         return None
+
+async def list_images(installed_only: bool = False) -> List[ImageInfo]:
+    images: List[ExegolImage] = await DockerUtils().listImages(include_custom=True)
+    DockerUtils().clearCache()
+    results: List[ImageInfo] = []
+    for i in images:
+        if installed_only and not i.isInstall():
+            continue
+        results.append(ImageInfo(
+            name=i.getName(),
+            version=i.getImageVersion(),
+            lastest_version=i.getLatestVersion(),
+            is_installed=i.isInstall(),
+            is_built_locally=i.isLocal(),
+            is_up_to_date=i.isUpToDate(),
+            build_date=i.getBuildDate(),
+            license=i.getDisplayLicense()
+        ))
+    return results

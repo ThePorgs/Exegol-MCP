@@ -2,9 +2,10 @@ from typing import List
 
 from mcp.server.fastmcp import Context
 
-from src.exegol_utils import get_exegol_container, check_exegol_readiness, get_container_by_name
-from src.mcp_app import mcp_server
-from src.models.container import ContainerInfo
+from exegol_mcp.models.image import ImageInfo
+from exegol_mcp.utils.exegol_utils import get_exegol_container, check_exegol_readiness, get_container_by_name, list_images
+from exegol_mcp.mcp_app import mcp_server
+from exegol_mcp.models.container import ContainerInfo
 
 
 @mcp_server.tool()
@@ -74,3 +75,17 @@ async def stop_container(
         await container.stop()
 
     return not container.isRunning()
+
+@mcp_server.tool()
+async def list_installed_images(ctx: Context) -> List[ImageInfo]:
+    """List all installed Exegol images with their status.
+        Returns a list of Exegol images installed on the system
+        with their detailed information (name, version, up-to-date status, etc...) in a chart.
+        Returns:
+            List of Exegol images with their metadata
+        Raises:
+            RuntimeError: If Exegol is not ready or configured
+    """
+    await ctx.info("Starting action: Listing Exegol installed images")
+    await check_exegol_readiness(ctx)
+    return await list_images(installed_only=True)

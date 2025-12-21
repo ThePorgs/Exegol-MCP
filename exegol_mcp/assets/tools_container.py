@@ -1,10 +1,10 @@
 from mcp.server.fastmcp import Context
 
-from src.exegol_utils import get_container_by_name, check_exegol_readiness
-from src.mcp_app import mcp_server
-from src.models.container import ExecutionResult
-from src.models.elicit_forms import UserConfirmation
-from src.utils.client_checks import is_elicitation_form_supported
+from exegol_mcp.utils.exegol_utils import get_container_by_name, check_exegol_readiness
+from exegol_mcp.mcp_app import mcp_server
+from exegol_mcp.models.container import ExecutionResult
+from exegol_mcp.models.elicit_forms import UserConfirmation
+from exegol_mcp.utils.client_checks import is_elicitation_form_supported
 
 
 @mcp_server.tool()

@@ -28,10 +28,10 @@ Repository = "https://github.com/ThePorgs/Exegol"
 Issues = "https://github.com/ThePorgs/Exegol/issues"
 
 [project.scripts]
-exegol-mcp = "src.main:main"
+exegol-mcp = "exegol_mcp.main:main"
 
 [tool.uv.build-backend]
-module-name = "src"
+module-name = "exegol_mcp"
 module-root = "."
 
 [dependency-groups]
