@@ -1,7 +1,7 @@
 import pytest
 
 # Importing assets registers all tools on the FastMCP server via decorators
-import src.assets  # noqa: F401
+import exegol_mcp.assets  # noqa: F401
 from exegol_mcp.mcp_app import mcp_server
 
 
@@ -11,6 +11,8 @@ EXPECTED_TOOLS = [
     "execute_command_in_container",
     "list_exegol_containers",
     "list_installed_images",
+    "list_all_images",
+    "download_image",
     "list_installed_tools",
     "get_tool_help",
 ]

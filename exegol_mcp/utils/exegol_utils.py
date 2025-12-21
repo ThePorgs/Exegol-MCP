@@ -95,6 +95,8 @@ def get_container_by_name(name: str) -> Optional[ExegolContainer]:
         return None
 
 async def list_images(installed_only: bool = False) -> List[ImageInfo]:
+    """List Exegol images from the exegol sdk"""
+    DockerUtils().clearCache()
     images: List[ExegolImage] = await DockerUtils().listImages(include_custom=True)
     DockerUtils().clearCache()
     results: List[ImageInfo] = []
@@ -112,3 +114,21 @@ async def list_images(installed_only: bool = False) -> List[ImageInfo]:
             license=i.getDisplayLicense()
         ))
     return results
+
+async def download_exegol_image(image_name: str, image_version: str = "latest") -> bool:
+    """Download an Exegol image from the exegol sdk"""
+    image_tag = f"{image_name}-{image_version}" if image_version != "latest" else image_name
+    try:
+        # Find image by name
+        selected_image = await DockerUtils().getOfficialImageFromList(image_tag)
+        DockerUtils().clearCache()
+    except ObjectNotFound:
+        raise RuntimeError(f"Image '{image_tag}' doesn't exist") from None
+
+    if await DockerUtils().downloadImage(selected_image, install_mode=not selected_image.isInstall()):
+        if not selected_image.isVersionSpecific() and selected_image.hasVersionTag():
+            result = await DockerUtils().downloadVersionTag(selected_image)
+            if type(result) is str:
+                raise RuntimeError(f"Error while downloading version tag, '{image_tag}': {result}")
+        return True
+    return False

@@ -3,9 +3,11 @@ from typing import List
 from mcp.server.fastmcp import Context
 
 from exegol_mcp.models.image import ImageInfo
-from exegol_mcp.utils.exegol_utils import get_exegol_container, check_exegol_readiness, get_container_by_name, list_images
+from exegol_mcp.utils.exegol_utils import get_exegol_container, check_exegol_readiness, get_container_by_name, \
+    list_images, download_exegol_image
 from exegol_mcp.mcp_app import mcp_server
 from exegol_mcp.models.container import ContainerInfo
+from exegol_mcp.utils.mocking.TUI_MCP import TUI_MCP
 
 
 @mcp_server.tool()
@@ -76,6 +78,7 @@ async def stop_container(
 
     return not container.isRunning()
 
+
 @mcp_server.tool()
 async def list_installed_images(ctx: Context) -> List[ImageInfo]:
     """List all installed Exegol images with their status.
@@ -89,3 +92,42 @@ async def list_installed_images(ctx: Context) -> List[ImageInfo]:
     await ctx.info("Starting action: Listing Exegol installed images")
     await check_exegol_readiness(ctx)
     return await list_images(installed_only=True)
+
+
+@mcp_server.tool()
+async def list_all_images(ctx: Context) -> List[ImageInfo]:
+    """List all Exegol images with their status.
+        Returns a list of Exegol images installed on the system and available to download
+        with their detailed information (name, version, up-to-date status, etc...).
+        Returns:
+            List of Exegol images with their metadata
+        Raises:
+            RuntimeError: If Exegol is not ready or configured
+    """
+    await ctx.info("Starting action: Listing Exegol images")
+    await check_exegol_readiness(ctx)
+    return await list_images()
+
+
+@mcp_server.tool()
+async def download_image(ctx: Context, image_name: str, image_version: str = "latest") -> bool:
+    """Download and install an Exegol image, this can be a new image or
+        update an already installed but outdated one.
+        Args:
+            image_name: Name of the image to download
+            image_version: Version of the image to download. All Pro images can download a specific legacy version except nightly
+        Returns:
+            return true if the image is installed
+    """
+    await ctx.info("Starting action: Downloading Exegol image")
+    await check_exegol_readiness(ctx)
+    if image_name in ["nightly", "free"] and image_version != "latest":
+        raise ValueError(f"{image_name} image can only be downloaded with version 'latest'")
+
+    TUI_MCP.DOWNLOAD_CONTEXT = ctx
+    try:
+        result = await download_exegol_image(image_name, image_version)
+    finally:
+        TUI_MCP.DOWNLOAD_CONTEXT = None
+
+    return result

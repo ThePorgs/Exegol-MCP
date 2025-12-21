@@ -1,21 +1,13 @@
-from exegol.utils.ExeLog import logger
-from exegol.utils.MetaSingleton import MetaSingleton
-from exegol.console.cli.ParametersManager import ParametersManager
-
 from exegol_mcp.assets import *
 from exegol_mcp.mcp_app import mcp_host, mcp_port
-from exegol_mcp.utils.ParametersMocked import ParametersMocked
 
 __version__ = "0.0.1a1"
 
-def patch_critical_loggers():
-    """Update exegol logger to raise exceptions instead of exit."""
-    logger.setCriticalMethod("raise")
+from exegol_mcp.utils.mocking.patching import ExegolPatching
 
 def main():
     print(f"Starting exegol-mcp v{__version__} !")
-    patch_critical_loggers()
-    MetaSingleton.mock(ParametersManager, ParametersMocked())
+    ExegolPatching.patch_exegol_sdk()
     # TODO
     #  - authentification (server / client)
     #  - add tools for orchestrator
