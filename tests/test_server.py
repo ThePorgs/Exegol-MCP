@@ -15,6 +15,7 @@ EXPECTED_TOOLS = [
     "download_image",
     "list_installed_tools",
     "get_tool_help",
+    "execute_remote_command"
 ]
 
 
