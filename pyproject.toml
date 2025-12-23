@@ -19,6 +19,8 @@ requires-python = ">=3.10"
 dependencies = [
     "exegol @ git+https://github.com/ThePorgs/Exegol.git@dev",
     "mcp>=1.23.3",
+    # Use OS keyring only on Windows and macOS to avoid extra deps on Linux
+    "keyring>=24; platform_system == 'Windows' or platform_system == 'Darwin'",
 ]
 
 [project.urls]

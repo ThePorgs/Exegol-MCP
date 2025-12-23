@@ -142,7 +142,6 @@ async def list_all_images(ctx: Context) -> List[ImageInfo]:
             RuntimeError: If Exegol is not ready or configured
     """
     await ctx.info("Starting action: Listing Exegol images")
-    await check_exegol_readiness(ctx)
     return await list_images()
 
 
@@ -162,6 +161,8 @@ async def download_image(ctx: Context, image_name: str, image_version: str = "la
             image_version: Version of the image to download. All Pro images can download a specific legacy version except nightly
         Returns:
             return true if the image is installed
+        Raises:
+            RuntimeError: If Exegol is not ready or configured
     """
     await ctx.info("Starting action: Downloading Exegol image")
     await check_exegol_readiness(ctx)

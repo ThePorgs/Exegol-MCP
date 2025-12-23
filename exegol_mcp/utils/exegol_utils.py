@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import List, Optional
 
@@ -5,12 +6,13 @@ from exegol.exceptions.ExegolExceptions import ObjectNotFound
 from exegol.model.ExegolContainer import ExegolContainer
 from exegol.model.ExegolImage import ExegolImage
 from exegol.utils.DockerUtils import DockerUtils
+from mcp.server.fastmcp import Context
 
 from exegol_mcp.models.container import ContainerInfo
 from exegol_mcp.models.image import ImageInfo
 
 
-async def check_exegol_readiness(ctx) -> bool:
+async def check_exegol_readiness(ctx: Optional[Context] = None) -> bool:
     """
     Check if Exegol is ready and DockerUtils can be used.
     Verifies that Docker/Exegol is available by attempting to instantiate DockerUtils.
@@ -28,7 +30,10 @@ async def check_exegol_readiness(ctx) -> bool:
         # This will fail if Docker is not running, not installed, or if Exegol is not properly configured
         _ = DockerUtils()  # Instantiating to verify availability
         # If instantiation succeeds, Exegol is ready
-        await ctx.info("Exegol readiness check passed")
+        if ctx:
+            await ctx.info("Exegol readiness check passed")
+        else:
+            logging.info("Exegol readiness check passed")
         return True
     except Exception as e:
         # If any exception occurs, Exegol is not ready
@@ -37,8 +42,12 @@ async def check_exegol_readiness(ctx) -> bool:
             f"Exegol is not ready yet. Please run exegol first with `exegol info` "
             f"and make sure it works. Error: {str(e)}"
         )
-        await ctx.error(error_msg)
-        raise RuntimeError(error_msg) from e
+        if ctx:
+            await ctx.error(error_msg)
+            raise RuntimeError(error_msg) from e
+        else:
+            logging.error(error_msg)
+            exit(1)
 
 async def get_exegol_container() -> List[ContainerInfo]:
     containers: List[ExegolContainer] = await DockerUtils().listContainers()
