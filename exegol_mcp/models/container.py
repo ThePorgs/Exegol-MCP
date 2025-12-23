@@ -20,6 +20,7 @@ class ContainerInfo(BaseModel):
     capabilities: List[str]
     comment: Optional[str]
 
+
 class ExecutionResult(BaseModel):
     exit_code: int = Field(description="Exit code of the command")
     output: str = Field(description="Command output (stdout + stderr)")

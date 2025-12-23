@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build-n-publish:
+    name: Build and publish Python 🐍 distributions to PyPI 📦
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: true
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.12"
+      - name: Build Exegol
+        run: pdm build
+      - name: Publish distribution 📦 to Test PyPI
+        run: pdm publish --no-build --repository https://test.pypi.org/legacy/ --skip-existing
+      - name: Publish distribution 📦 to PyPI (prod)
+        run: pdm publish --no-build

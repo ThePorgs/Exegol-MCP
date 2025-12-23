@@ -135,9 +135,51 @@ async def download_exegol_image(image_name: str, image_version: str = "latest") 
         raise RuntimeError(f"Image '{image_tag}' doesn't exist") from None
 
     if await DockerUtils().downloadImage(selected_image, install_mode=not selected_image.isInstall()):
-        if not selected_image.isVersionSpecific() and selected_image.hasVersionTag():
+        if selected_image.isVersionSpecific():
+            # Install latest tag if not already installed
+            try:
+                result = await DockerUtils().getOfficialImageFromList(image_name)
+                if result is None or not result.isInstall():
+                    raise ObjectNotFound
+            except ObjectNotFound:
+                DockerUtils().createLocalLastestImageTag(selected_image)
+        elif selected_image.hasVersionTag():
+            # Install version specific tag
             result = await DockerUtils().downloadVersionTag(selected_image)
             if type(result) is str:
                 raise RuntimeError(f"Error while downloading version tag, '{image_tag}': {result}")
         return True
     return False
+
+
+async def read_installed_resources(ctx: Context, container_name: str, target_os: str) -> List[str]:
+    """
+    Helper function to read the installed_tools.csv file from an Exegol container.
+    Args:
+        container_name: Name of the Exegol container
+        target_os: OS type of the target
+        ctx: MCP context
+    Returns:
+        Content of the installed_tools.csv file
+    """
+    if target_os not in ["linux", "windows"]:
+        raise ValueError(f"Invalid target OS '{target_os}'. Only 'linux' and 'windows' are supported.")
+    container = get_container_by_name(container_name)
+    if not container:
+        await ctx.error(f"Container '{container_name}' not found")
+        raise ValueError(f"Container '{container_name}' not found")
+
+    # Check if container is running
+    if not container.isRunning():
+        await ctx.error(f"Container '{container_name}' is not running")
+        raise RuntimeError(f"Container '{container_name}' is not running")
+
+    # Read the installed_tools.csv file from the container
+    # The file is located at /.exegol/installed_tools.csv in each container
+    exit_code, output = await container.exec_raw(f"find /opt/resources/{target_os} -type f | grep -iv '/.git' | grep -ivE '\\.(md|png|jpg|txt|py|c|cpp|cs|h|sln|vcxproj(.filters)?|xml|csproj|yml|pdb|dll|idl|sys|chm|desktop|json|pssproj|rst|spec|xsd|config|asm)$' | grep -ivE '/(LICEN[SC]E|makefile|bootstrap|dockerfile)$'")
+
+    if exit_code != 0:
+        await ctx.error(f"Failed to read installed_tools.csv from container '{container_name}'")
+        raise RuntimeError(f"Failed to read installed_tools.csv: {output}")
+
+    return output.splitlines()

@@ -5,6 +5,7 @@ import sys
 
 import uvicorn
 from exegol.utils.ExeLog import ExeLog
+from rich.console import Console
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
@@ -102,8 +103,10 @@ def main(argv: list[str] | None = None):
     elif args.type == "stdio":
         if args.print_config:
             display_header(args)
-        # Disable logging
+        # Disable logging to avoid interfering with the MCP protocol
         logging.getLogger().setLevel(100)
+        ExeLog.console = Console(quiet=True)
+        ExeLog.setVerbosity(0, quiet=True)
 
         # Start stdio MCP server
         mcp_server.run()
