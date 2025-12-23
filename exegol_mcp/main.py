@@ -13,7 +13,7 @@ from starlette.routing import Mount
 
 from exegol_mcp.assets import *
 
-__version__ = "0.0.1a1"
+__version__ = "1.0.0"
 
 from exegol_mcp.utils.auth_backend import BearerAuthBackend, on_auth_error
 from exegol_mcp.utils.cli import parse_args

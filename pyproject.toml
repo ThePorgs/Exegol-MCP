@@ -1,23 +1,23 @@
 [build-system]
-requires = ["uv_build>=0.9.17,<0.10.0"]
-build-backend = "uv_build"
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
 
 [project]
 name = "exegol-mcp"
-version = "0.1.0a1"
+dynamic = ["version"]
 description = "MCP server for Exegol"
 authors = [
     { name = "Dramelac", email = "dramelac@pm.me" },
-    { name = "Elliot Belt", email = "felix.billieres1@gmail.com" },
+    { name = "Félix Billières", email = "felix.billieres1@gmail.com" },
 ]
 license = { file = "LICENSE.md" }
 readme = { file = "README.md", content-type = "text/markdown" }
 
-keywords = ["exegol", "mcp", "ctf"]
+keywords = ["exegol", "mcp", "ctf", "ai", "llm"]
 
 requires-python = ">=3.10"
 dependencies = [
-    "exegol @ git+https://github.com/ThePorgs/Exegol.git@dev",
+    "exegol~=5.1.8",
     "mcp>=1.23.3",
     # Use OS keyring only on Windows and macOS to avoid extra deps on Linux
     "keyring>=24; platform_system == 'Windows' or platform_system == 'Darwin'",
@@ -25,23 +25,28 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://exegol.com"
-Documentation = "https://docs.exegol.com"
-Repository = "https://github.com/ThePorgs/Exegol"
-Issues = "https://github.com/ThePorgs/Exegol/issues"
+Documentation = "https://docs.exegol.com/mcp/features"
+Repository = "https://github.com/ThePorgs/Exegol-MCP"
+Issues = "https://github.com/ThePorgs/Exegol-MCP/issues"
 
 [project.scripts]
 exegol-mcp = "exegol_mcp.main:main"
-
-[tool.uv.build-backend]
-module-name = "exegol_mcp"
-module-root = "."
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.25.0",
     "asgi-lifespan>=2.1.0",
+    "exegol @ git+https://github.com/ThePorgs/Exegol.git@dev",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.pdm]
+[tool.pdm.version]
+source = "file"
+path = "exegol_mcp/main.py"
+
+[tool.pdm.build]
+excludes = ["tests"]
