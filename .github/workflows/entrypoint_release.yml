@@ -15,8 +15,6 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@main
-        with:
-          submodules: true
       - name: Set up PDM
         uses: pdm-project/setup-pdm@v4
         with:
