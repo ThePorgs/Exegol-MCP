@@ -255,7 +255,22 @@ async def execute_remote_command(
     """
     Execute a command remotely through various protocols (SSH, WinRM, SMB, MSSQL, WMI, RDP).
     This tool directly executes the command without creating a persistent session.
-    
+    IMPORTANT: This tool is more specific than execute_command_in_container - use it for all remote network connections.
+
+    RELATED TOOLS:
+    - execute_command_in_container: For local container operations (not network-based)
+    - list_exegol_containers: To choose which container to use for remote execution
+    - start_container: To ensure the container is running before remote operations
+    - list_installed_tools: To discover network/security tools available in containers
+
+    SUPPORTED PROTOCOLS:
+    - ssh: Secure Shell connections
+    - winrm: Windows Remote Management
+    - smb: Server Message Block (Windows file sharing)
+    - mssql: Microsoft SQL Server
+    - wmi: Windows Management Instrumentation
+    - rdp: Remote Desktop Protocol
+
     Args:
         container_name: Name of the Exegol container to use
         protocol: Protocol to use (ssh, winrm, smb, mssql, wmi, rdp)
@@ -265,7 +280,7 @@ async def execute_remote_command(
         command: Command to execute
         domain: Optional domain name (for Windows protocols like smb, winrm)
         port: Optional custom port
-        use_powershell: Use PowerShell flag (-X) instead of normal flag (-x). 
+        use_powershell: Use PowerShell flag (-X) instead of normal flag (-x).
                        Useful for SMB PowerShell commands or WinRM commands.
     Returns:
         ExecutionResult with command output and exit code

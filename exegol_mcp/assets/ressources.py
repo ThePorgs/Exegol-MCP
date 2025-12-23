@@ -46,6 +46,14 @@ async def list_installed_tools(
 ) -> List[InstalledTool]:
     """
     List all installed tools in an Exegol container by reading the installed_tools.csv file.
+    IMPORTANT: Always check if there isn't a more specific tool created for this task before using this tool.
+
+    RELATED TOOLS:
+    - get_tool_help: To get detailed help for specific tools from this list
+    - execute_command_in_container: To actually use the tools listed here
+    - list_exegol_containers: To choose which container to explore
+    - start_container: To ensure container is running before listing tools
+
     Args:
         container_name: Name of the Exegol container
     Returns:
@@ -82,6 +90,13 @@ async def get_tool_help(
     """
     Get help/documentation for a specific tool installed in an Exegol container.
     Tries common help flags: -h, --help, help
+    IMPORTANT: Always check if there isn't a more specific tool created for this task before using this tool.
+
+    RELATED TOOLS:
+    - list_installed_tools: To discover available tools before getting help
+    - execute_command_in_container: To test tools after reading their help
+    - list_exegol_containers: To choose which container to get help from
+
     Args:
         container_name: Name of the Exegol container
         tool_name: Name of the tool to get help for

@@ -15,6 +15,15 @@ async def execute_command_in_container(
 ) -> ExecutionResult:
     """
     Execute a command in an Exegol container.
+    IMPORTANT: Always check if there isn't a more specific tool created for this task (like execute_remote_command for remote connections) before using this tool.
+
+    RELATED TOOLS:
+    - execute_remote_command: For remote network connections (SSH, WinRM, SMB, etc.)
+    - list_installed_tools: To discover available tools before executing commands
+    - get_tool_help: To get help documentation for specific tools
+    - list_exegol_containers: To check container status before execution
+    - start_container/stop_container: To manage container lifecycle
+
     Args:
         container_name: Name of the container
         command: Command to execute
