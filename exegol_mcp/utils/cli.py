@@ -11,26 +11,26 @@ def parse_args(argv: list[str] | None = None):
     )
     parser.add_argument(
         "--auth",
-        choices=["bearer", "none"],
+        choices=["none", "bearer"],
         default="bearer",
-        help="Authentication mode for the HTTP server (default: bearer)",
+        help="Authentication mode for the server, when in http mode (default: bearer)",
     )
     parser.add_argument(
-        "--print-config",
+        "-pc", "--print-config",
         action="store_true",
-        help="Print the mcp configuration template and exit",
+        help="Print the MCP configuration and exit",
     )
     parser.add_argument(
-        "-p","--port",
+        "-p", "--port",
         action="store",
-        default=8000,
+        default=2187,
         type=int,
-        help="Choose the port of the HTTP server (default: 8000)",
+        help="Choose the port of the HTTP server (default: 2187)",
     )
     parser.add_argument(
-        "--type",
+        "-t", "--type",
         choices=["http", "stdio"],
         default="http",
-        help="# TODO",
+        help="Choose the type of server to run (default: http)",
     )
     return parser.parse_args(argv)
