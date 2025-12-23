@@ -16,8 +16,21 @@ def parse_args(argv: list[str] | None = None):
         help="Authentication mode for the HTTP server (default: bearer)",
     )
     parser.add_argument(
-        "--print-secret",
+        "--print-config",
         action="store_true",
-        help="Print the current bearer secret and exit",
+        help="Print the mcp configuration template and exit",
+    )
+    parser.add_argument(
+        "-p","--port",
+        action="store",
+        default=8000,
+        type=int,
+        help="Choose the port of the HTTP server (default: 8000)",
+    )
+    parser.add_argument(
+        "--type",
+        choices=["http", "stdio"],
+        default="http",
+        help="# TODO",
     )
     return parser.parse_args(argv)
