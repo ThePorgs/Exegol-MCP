@@ -21,6 +21,14 @@ class ContainerInfo(BaseModel):
     comment: Optional[str]
 
 
+class ContainerCreationResult(BaseModel):
+    """Result of a container creation operation"""
+    name: str = Field(description="Name of the created container")
+    image: str = Field(description="Image used for the container")
+    status: str = Field(description="Container status after creation")
+    workspace_path: str = Field(description="Host path to the container workspace")
+
+
 class ExecutionResult(BaseModel):
     exit_code: int = Field(description="Exit code of the command")
     output: str = Field(description="Command output (stdout + stderr)")

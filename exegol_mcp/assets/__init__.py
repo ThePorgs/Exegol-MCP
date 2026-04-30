@@ -1,5 +1,5 @@
 from exegol_mcp.mcp_app import mcp_server
 from exegol_mcp.assets.ressources import list_installed_tools, get_tool_help
 from exegol_mcp.assets.tools_container import execute_command_in_container
-from exegol_mcp.assets.tools_orchestractor import list_exegol_containers, stop_container, start_container, list_installed_images, list_all_images, download_image
+from exegol_mcp.assets.tools_orchestractor import list_exegol_containers, stop_container, start_container, list_installed_images, list_all_images, download_image, create_container
 from exegol_mcp.assets.sessions import execute_remote_command

@@ -50,6 +50,7 @@ async def check_exegol_readiness(ctx: Optional[Context] = None) -> bool:
             exit(1)
 
 async def get_exegol_container() -> List[ContainerInfo]:
+    DockerUtils().clearCache()
     containers: List[ExegolContainer] = await DockerUtils().listContainers()
     results: List[ContainerInfo] = []
     for container in containers:
@@ -89,6 +90,181 @@ async def get_exegol_container() -> List[ContainerInfo]:
             capabilities=["Docker default capabilities"] + container.config.getCapabilities()
         ))
     return results
+
+async def create_exegol_container(
+        name: str,
+        image_name: str,
+        network_mode: str = "host",
+        vpn_path: Optional[str] = None,
+        vpn_auth: Optional[str] = None,
+        enable_gui: bool = True,
+        enable_desktop: bool = False,
+        desktop_config: Optional[str] = None,
+        share_timezone: bool = True,
+        enable_my_resources: bool = True,
+        enable_exegol_resources: bool = True,
+        enable_shell_logging: bool = False,
+        shell_logging_method: str = "asciinema",
+        shell_logging_compress: Optional[bool] = None,
+        privileged: bool = False,
+        hostname: Optional[str] = None,
+        shell: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        devices: Optional[List[str]] = None,
+        envs: Optional[dict] = None,
+        volumes: Optional[List[dict]] = None,
+        ports: Optional[List[dict]] = None,
+        workspace_path: Optional[str] = None,
+        comment: Optional[str] = None,
+) -> ExegolContainer:
+    """Create a new Exegol container using the SDK.
+
+    Covers all `exegol start` creation parameters.
+
+    Args:
+        name: Container name
+        image_name: Exegol image to use (e.g. "free", "ad", "web")
+        network_mode: Network mode (host, bridge, docker, nat, disabled)
+        vpn_path: Path to VPN config file on the host
+        vpn_auth: Path to VPN auth credentials file
+        enable_gui: Enable console GUI (X11 + Wayland)
+        enable_desktop: Enable remote desktop
+        desktop_config: Desktop configuration string (e.g. "localhost:3389")
+        share_timezone: Share host timezone with the container
+        enable_my_resources: Mount /opt/my-resources
+        enable_exegol_resources: Mount /opt/resources
+        enable_shell_logging: Enable shell logging
+        shell_logging_method: Logging method: "asciinema" or "script"
+        shell_logging_compress: Compress shell logs (None = default)
+        privileged: Run container in privileged mode
+        hostname: Custom hostname (default: container name)
+        shell: Default shell (e.g. "bash", "zsh", "fish")
+        capabilities: Additional Linux capabilities (e.g. ["NET_ADMIN", "SYS_PTRACE"])
+        devices: Host devices to passthrough (e.g. ["/dev/ttyUSB0"])
+        envs: Environment variables as key-value pairs (e.g. {"MY_VAR": "value"})
+        volumes: Volume mounts as list of {host, container, read_only?} dicts
+        ports: Port mappings as list of {host, container, protocol?} dicts
+        workspace_path: Custom workspace path on host (default: dedicated)
+        comment: Optional comment describing the container purpose
+    Returns:
+        The created ExegolContainer
+    """
+    import re
+    from exegol.model.ContainerConfig import ContainerConfig
+    from exegol.model.ExegolContainerTemplate import ExegolContainerTemplate
+    from exegol.model.ExegolNetwork import ExegolNetworkMode
+
+    # Validate name
+    if not name or not name.strip():
+        raise ValueError("Container name cannot be empty")
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$', name):
+        raise ValueError(f"Invalid container name '{name}'. Use only letters, digits, hyphens, dots, and underscores.")
+
+    # Validate network mode
+    mode_map = {
+        "host": ExegolNetworkMode.host,
+        "bridge": ExegolNetworkMode.docker,
+        "docker": ExegolNetworkMode.docker,
+        "nat": ExegolNetworkMode.nat,
+        "disabled": ExegolNetworkMode.disabled,
+    }
+    if network_mode.lower() not in mode_map:
+        raise ValueError(f"Invalid network mode '{network_mode}'. Valid: {', '.join(mode_map.keys())}")
+
+    # Resolve image
+    selected_image = await DockerUtils().getOfficialImageFromList(image_name)
+    if selected_image is None:
+        raise ValueError(f"Image '{image_name}' not found")
+    if not selected_image.isInstall():
+        raise ValueError(f"Image '{image_name}' is not installed. Download it first with download_image.")
+
+    # Build config
+    config = ContainerConfig(container_name=name, hostname=hostname)
+
+    # Network
+    net_mode = mode_map[network_mode.lower()]
+    await config.setNetworkMode(net_mode)
+
+    # Core features
+    if enable_gui:
+        await config.enableGUI()
+    if enable_desktop:
+        await config.enableDesktop(desktop_config or "")
+    if share_timezone:
+        config.enableSharedTimezone()
+    if enable_my_resources:
+        config.enableMyResources()
+    if enable_exegol_resources:
+        await config.enableExegolResources()
+    if enable_shell_logging:
+        config.enableShellLogging(shell_logging_method, shell_logging_compress)
+    if privileged:
+        config.setPrivileged(True)
+    if vpn_path:
+        # VPN auth is read from ParametersManager inside enableVPN
+        if vpn_auth:
+            from exegol.console.cli.ParametersManager import ParametersManager
+            ParametersManager().set_parameter("vpn_auth", vpn_auth)
+        await config.enableVPN(vpn_path)
+        if vpn_auth:
+            ParametersManager().set_parameter("vpn_auth", None)
+    if comment:
+        config.setComment(comment)
+
+    # Shell override
+    if shell:
+        config.addEnv(ContainerConfig.ExegolEnv.user_shell.value, shell)
+
+    # Capabilities
+    if capabilities:
+        for cap in capabilities:
+            config.addCapability(cap.upper())
+
+    # Devices
+    if devices:
+        for dev in devices:
+            config.addUserDevice(dev)
+
+    # Environment variables
+    if envs:
+        for key, value in envs.items():
+            config.addEnv(key, str(value))
+
+    # Volumes
+    if volumes:
+        for vol in volumes:
+            config.addVolume(
+                host_path=vol["host"],
+                container_path=vol["container"],
+                read_only=vol.get("read_only", False),
+            )
+
+    # Ports
+    if ports:
+        for port in ports:
+            await config.addPort(
+                port_host=int(port["host"]),
+                port_container=int(port["container"]),
+                protocol=port.get("protocol", "tcp"),
+            )
+
+    # Custom workspace path
+    if workspace_path:
+        config.setWorkspaceShare(workspace_path)
+
+    # Create template and container
+    template = ExegolContainerTemplate(name=name, image=selected_image, config=config)
+    container = DockerUtils().createContainer(template)
+
+    # Post-creation setup (entrypoint patching, workspace deployment)
+    await container.postCreateSetup()
+    await container.start()
+
+    # Clear DockerUtils cache so list_exegol_containers sees the new container
+    DockerUtils().clearCache()
+
+    return container
+
 
 def get_container_by_name(name: str) -> Optional[ExegolContainer]:
     """

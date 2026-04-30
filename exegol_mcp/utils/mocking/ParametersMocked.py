@@ -13,6 +13,7 @@ class ParametersMocked(metaclass=MetaSingleton):
         self.arch = EnvInfo.arch
         self.offline_mode = False
         self.accept_eula = False
+        self.update_fs_perms = False
 
         self.__dynamic_parameters: Dict[str, Any] = {}
 
