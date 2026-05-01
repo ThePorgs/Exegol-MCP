@@ -172,8 +172,9 @@ async def create_exegol_container(
         raise ValueError(f"Invalid network mode '{network_mode}'. Valid: {', '.join(mode_map.keys())}")
 
     # Resolve image
-    selected_image = await DockerUtils().getOfficialImageFromList(image_name)
-    if selected_image is None:
+    try:
+        selected_image = await DockerUtils().getOfficialImageFromList(image_name)
+    except ObjectNotFound:
         raise ValueError(f"Image '{image_name}' not found")
     if not selected_image.isInstall():
         raise ValueError(f"Image '{image_name}' is not installed. Download it first with download_image.")
@@ -214,6 +215,9 @@ async def create_exegol_container(
     # Shell override
     if shell:
         config.addEnv(ContainerConfig.ExegolEnv.user_shell.value, shell)
+        if shell in ["zsh", "bash", "sh"]:
+            # tmux dynamically set SHELL variable and should be excluded here
+            config.addEnv("SHELL",f"/bin/{shell}")
 
     # Capabilities
     if capabilities:

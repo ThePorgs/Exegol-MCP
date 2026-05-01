@@ -187,6 +187,7 @@ async def create_container(
         vpn_auth: Optional[str] = None,
         enable_gui: bool = True,
         enable_desktop: bool = False,
+        desktop_protocol: Optional[str] = None,
         desktop_config: Optional[str] = None,
         share_timezone: bool = True,
         enable_my_resources: bool = True,
@@ -229,15 +230,16 @@ async def create_container(
         container_name: Name for the new container (alphanumeric, hyphens, dots, underscores)
         image_name: Exegol image to use (e.g. "free", "ad", "web", "full", "osint", "light", "nightly")
         network_mode: Network mode (host, docker, nat, disabled)
-        vpn_path: Host path to an OpenVPN config file (.ovpn)
-        vpn_auth: Host path to VPN auth credentials file
+        vpn_path: Host path to an OpenVPN config file (.ovpn) or a WireGuard config file (.conf)
+        vpn_auth: Host path to VPN auth credentials file (username first line, password second line)
         enable_gui: Enable console GUI with X11 + Wayland forwarding
-        enable_desktop: Enable remote desktop access
+        enable_desktop: Enable virtual desktop (from web browser)
+        desktop_protocol: Desktop protocol (can be "http" or "vnc". Default is "http")
         desktop_config: Desktop configuration string (e.g. "localhost:3389")
         share_timezone: Share host timezone with the container
-        enable_my_resources: Mount /opt/my-resources in the container
+        enable_my_resources: Mount /opt/my-resources in the container (user customization)
         enable_exegol_resources: Mount /opt/resources (offline pentest resources)
-        enable_shell_logging: Enable shell session recording
+        enable_shell_logging: Enable shell session recording (enables traceability and logging for all sessions)
         shell_logging_method: Shell logging method: "asciinema" (default) or "script"
         shell_logging_compress: Compress shell logs (None = use default)
         privileged: Run in privileged mode (use with caution)
@@ -248,7 +250,7 @@ async def create_container(
         envs: Extra environment variables as key-value pairs (e.g. {"MY_VAR": "value"})
         volumes: Extra volume mounts as list of {"host": "/path", "container": "/path", "read_only": false}
         ports: Port mappings as list of {"host": 8080, "container": 80, "protocol": "tcp"}
-        workspace_path: Custom workspace path on host (default: ~/.exegol/workspaces/<name>)
+        workspace_path: Custom workspace path on host (default: directory managed by exegol)
         comment: Optional comment describing the container purpose
     Returns:
         ContainerCreationResult with name, image, status and workspace path
@@ -260,6 +262,9 @@ async def create_container(
     existing = get_container_by_name(container_name)
     if existing:
         raise ValueError(f"Container '{container_name}' already exists")
+
+    if desktop_config or desktop_protocol:
+        desktop_config = f"{desktop_protocol if desktop_protocol else ''}:{desktop_config if desktop_config else ''}"
 
     container = await create_exegol_container(
         name=container_name,
@@ -288,15 +293,10 @@ async def create_container(
         comment=comment,
     )
 
-    import os
-    workspace_path = os.path.join(
-        os.path.expanduser("~"), ".exegol", "workspaces", container_name
-    )
-
     await ctx.info(f"Container '{container_name}' created and started successfully")
     return ContainerCreationResult(
         name=container.name,
         image=f"{container.image.getName()} {container.image.getImageVersion()}",
         status=container.getRawStatus(),
-        workspace_path=workspace_path,
+        workspace_path=container.config.getHostWorkspacePath(),
     )
