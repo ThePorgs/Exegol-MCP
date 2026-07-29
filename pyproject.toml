@@ -17,8 +17,8 @@ keywords = ["exegol", "mcp", "ctf", "ai", "llm"]
 
 requires-python = ">=3.10"
 dependencies = [
-    "exegol~=5.1.8",
-    "mcp>=1.23.3",
+    "exegol~=5.1.11",
+    "mcp~=1.29.0",
     # Use OS keyring only on Windows and macOS to avoid extra deps on Linux
     "keyring>=24; platform_system == 'Windows' or platform_system == 'Darwin'",
 ]
