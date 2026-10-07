@@ -18,13 +18,13 @@ class BearerAuthBackend(AuthenticationBackend):
 
     async def authenticate(self, conn):
         if "Authorization" not in conn.headers:
-            return
+            raise AuthenticationError('Invalid bearer auth credentials')
 
         auth = conn.headers["Authorization"]
         try:
             scheme, credentials = auth.split()
             if scheme.lower() != 'bearer':
-                return
+                raise AuthenticationError('Invalid bearer auth credentials')
         except (ValueError, UnicodeDecodeError) as exc:
             raise AuthenticationError('Invalid bearer auth credentials')
 
