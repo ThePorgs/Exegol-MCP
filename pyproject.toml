@@ -17,8 +17,8 @@ keywords = ["exegol", "mcp", "ctf", "ai", "llm"]
 
 requires-python = ">=3.10"
 dependencies = [
-    "exegol~=5.1.11",
-    "mcp~=1.29.0",
+    "exegol~=5.1.13",
+    "mcp~=1.30.0",
     # Use OS keyring only on Windows and macOS to avoid extra deps on Linux
     "keyring>=24; platform_system == 'Windows' or platform_system == 'Darwin'",
 ]
@@ -34,8 +34,8 @@ exegol-mcp = "exegol_mcp.main:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-asyncio>=0.25.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "asgi-lifespan>=2.1.0",
     "exegol @ git+https://github.com/ThePorgs/Exegol.git@dev",
 ]
