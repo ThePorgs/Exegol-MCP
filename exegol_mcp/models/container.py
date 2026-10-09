@@ -29,5 +29,6 @@ class ExecutionResult(BaseModel):
 class InstalledTool(BaseModel):
     """Information about an installed tool in an Exegol container"""
     name: str = Field(description="Name of the tool")
+    version: Optional[str] = Field(default=None, description="Installed tool version when recorded")
     category: Optional[str] = Field(default=None, description="Category of the tool")
     description: Optional[str] = Field(default=None, description="Description of the tool")
