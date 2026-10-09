@@ -70,8 +70,10 @@ async def list_installed_tools(
     csv_reader = csv.DictReader(io.StringIO(csv_content))
 
     for row in csv_reader:
+        version = row.get('version', row.get('Version', '')).strip()
         tool = InstalledTool(
             name=row.get('name', row.get('Tool', row.get('tool', ''))).strip(),
+            version=version or None,
             category=row.get('category', row.get('Category', '')).strip() or None,
             description=row.get('description', row.get('Description', '')).strip() or None
         )
