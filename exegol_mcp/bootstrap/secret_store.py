@@ -402,8 +402,10 @@ def _create_private_file_no_replace(directory: Path, name: str, data: bytes) -> 
     The content goes to a new O_EXCL temporary file, handed back to the invoking user, then hard-linked to name, so
     the final name only ever appears complete and an entry that appeared meanwhile is never replaced. The link never
     follows a symbolic link at the temporary name (one the invoking user renamed over it, CR-01), and the published
-    entry must then be the inode that was written, or it is removed again. The file and the dir are fsync'ed before
-    True is returned, so a caller may then remove the only other copy (WR-08). The temporary name is always removed.
+    entry must then be a regular file with the inode that was written, or it is removed again. The temporary file
+    stays open until that check, so its inode cannot be freed and handed to a file put at the temporary name (ext4
+    reuses a freed inode number at once). The file and the dir are fsync'ed before True is returned, so a caller may
+    then remove the only other copy (WR-08). The temporary name is always removed.
 
     Returns:
         True when the file was created, False when an entry with that name already exists (it is kept).
@@ -422,6 +424,8 @@ def _create_private_file_no_replace(directory: Path, name: str, data: bytes) -> 
         temp = f".{name}.{secrets.token_hex(8)}.tmp"
         fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
         try:
+            # The descriptor stays open until the published entry is checked: an open file keeps its inode, so a
+            # symlink renamed over the temporary name can never receive the same inode number (ext4 reuses one at once).
             try:
                 os.fchmod(fd, 0o600)  # whatever the umask
                 view = memoryview(data)
@@ -430,25 +434,29 @@ def _create_private_file_no_replace(directory: Path, name: str, data: bytes) -> 
                 _hand_back(fd, path)
                 os.fsync(fd)  # the content is on disk before the name appears (WR-08)
                 written = os.fstat(fd)
+                try:
+                    # linkat without AT_SYMLINK_FOLLOW: a symlink at the temporary name is linked itself, never its
+                    # target.
+                    os.link(temp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd, follow_symlinks=False)
+                except FileExistsError:
+                    return False
+                try:
+                    published = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+                    if not stat.S_ISREG(published.st_mode) or (published.st_dev, published.st_ino) != (
+                        written.st_dev,
+                        written.st_ino,
+                    ):
+                        raise UnsafeConfigPathError(
+                            errno.EPERM, "the temporary file was replaced before it was linked", str(path)
+                        )
+                    os.fsync(dir_fd)  # the name is on disk before a caller removes the only other copy (WR-08)
+                except BaseException:
+                    with contextlib.suppress(OSError):
+                        os.unlink(name, dir_fd=dir_fd)
+                    raise
+                return True
             finally:
                 os.close(fd)
-            try:
-                # linkat without AT_SYMLINK_FOLLOW: a symlink at the temporary name is linked itself, never its target.
-                os.link(temp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd, follow_symlinks=False)
-            except FileExistsError:
-                return False
-            try:
-                published = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-                if (published.st_dev, published.st_ino) != (written.st_dev, written.st_ino):
-                    raise UnsafeConfigPathError(
-                        errno.EPERM, "the temporary file was replaced before it was linked", str(path)
-                    )
-                os.fsync(dir_fd)  # the name is on disk before a caller removes the only other copy (WR-08)
-            except BaseException:
-                with contextlib.suppress(OSError):
-                    os.unlink(name, dir_fd=dir_fd)
-                raise
-            return True
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(temp, dir_fd=dir_fd)

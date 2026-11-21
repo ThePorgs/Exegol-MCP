@@ -432,6 +432,91 @@ def test_a_symlink_swapped_over_the_temporary_file_is_never_published(
 
 @posix_only
 @pytest.mark.parametrize("name", ADOPTED_FILE_NAMES)
+def test_the_temporary_file_stays_open_until_the_published_entry_is_checked(
+    old_dir: Path, new_dir: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """CR-01 on ext4: a closed temporary file frees its inode, and a symlink renamed over the temporary name then
+    receives the same inode number, so the inode check passes for a symlink. The descriptor must still be open when
+    the name is linked and checked, and is closed afterwards."""
+    (old_dir / name).write_bytes(CONTENT[name])
+    real_open, real_close, real_link, real_stat = os.open, os.close, os.link, os.stat
+    temp_fds: list[int] = []
+    closed: list[int] = []
+    events: list[str] = []
+
+    def recording_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if isinstance(path, str) and path.endswith(".tmp"):
+            temp_fds.append(fd)
+        return fd
+
+    def recording_close(fd: int) -> None:
+        if fd in temp_fds:
+            closed.append(fd)
+            events.append("close")
+        real_close(fd)
+
+    def checking_link(src: str, dst: str, **kwargs: Any) -> None:
+        events.append("link" if temp_fds and not closed else "link-after-close")
+        real_link(src, dst, **kwargs)
+
+    def checking_stat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        if path == name:
+            events.append("check" if not closed else "check-after-close")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    monkeypatch.setattr(os, "close", recording_close)
+    monkeypatch.setattr(os, "link", checking_link)
+    monkeypatch.setattr(os, "stat", checking_stat)
+
+    assert secret_store.read_user_config_file(name) == CONTENT[name]
+
+    assert events[:3] == ["link", "check", "close"], events
+    assert (new_dir / name).read_bytes() == CONTENT[name]
+
+
+@posix_only
+@pytest.mark.parametrize("name", ADOPTED_FILE_NAMES)
+def test_a_published_entry_that_is_not_a_regular_file_is_refused_even_with_the_written_inode(
+    sudo_as_root: Path, old_dir: Path, new_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """CR-01: the inode check alone is not enough where inode numbers are reused, so the published entry must also
+    be a regular file. A symlink at the final name that reports the written inode is still refused and removed."""
+    (old_dir / name).write_bytes(CONTENT[name])
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"root-only")
+    before = [_entry(old_dir / name), _entry(victim)]
+    real_link, real_stat = os.link, os.stat
+    written: list[os.stat_result] = []
+
+    def swapping_link(src: str, dst: str, *, src_dir_fd: int, dst_dir_fd: int, follow_symlinks: bool = True) -> None:
+        written.append(real_stat(src, dir_fd=src_dir_fd, follow_symlinks=False))
+        os.unlink(src, dir_fd=src_dir_fd)
+        os.symlink(victim, src, dir_fd=src_dir_fd)
+        real_link(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=follow_symlinks)
+
+    def reused_inode_stat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        result = real_stat(path, *args, **kwargs)
+        if path == name and written and stat.S_ISLNK(result.st_mode):
+            fields = list(result)
+            fields[1], fields[2] = written[0].st_ino, written[0].st_dev  # what a reused inode number looks like
+            return os.stat_result(fields)
+        return result
+
+    monkeypatch.setattr(os, "link", swapping_link)
+    monkeypatch.setattr(os, "stat", reused_inode_stat)
+
+    with pytest.raises(OSError) as refused:
+        secret_store.read_user_config_file(name)
+
+    assert str(old_dir / name) in str(refused.value) and CONFIG_DIR_NAME in str(refused.value)
+    assert list(new_dir.iterdir()) == []
+    assert [_entry(old_dir / name), _entry(victim)] == before
+
+
+@posix_only
+@pytest.mark.parametrize("name", ADOPTED_FILE_NAMES)
 def test_the_new_copy_and_its_dir_are_flushed_before_the_old_file_is_removed(
     old_dir: Path, new_dir: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
