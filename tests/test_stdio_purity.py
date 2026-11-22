@@ -20,7 +20,6 @@ from anyio.abc import Process
 from mcp_types import jsonrpc_message_adapter
 from mcp_types.version import LATEST_HANDSHAKE_VERSION
 
-from exegol_mcp import __version__
 from tests.fake_server import NOISE_MARKER, REPO_ROOT, launcher_command, server_env, stdio_args
 
 STEP_TIMEOUT = 30.0
@@ -102,10 +101,12 @@ def _non_json_rpc_lines(lines: list[str]) -> list[str]:
     return bad
 
 
-async def _run_noisy_stdio_session(home: Path) -> tuple[RawStdioSession, int, str, dict[str, dict[str, Any]]]:
+async def _run_noisy_stdio_session(
+    home: Path, *, noise: bool = True
+) -> tuple[RawStdioSession, int, str, dict[str, dict[str, Any]]]:
     process = await anyio.open_process(
         launcher_command(*stdio_args()),
-        env=server_env(home, EXEGOL_MCP_TEST_NOISE="1"),
+        env=server_env(home, **({"EXEGOL_MCP_TEST_NOISE": "1"} if noise else {})),
         cwd=REPO_ROOT,
     )
     session = RawStdioSession(process)
@@ -140,7 +141,7 @@ async def test_stdio_stdout_carries_only_json_rpc_messages(tmp_path: Path) -> No
     assert session.stdout_lines, "the server wrote nothing on stdout"
     assert _non_json_rpc_lines(session.stdout_lines) == [], stderr
     stdout = "\n".join(session.stdout_lines)
-    for leak in (NOISE_MARKER, "MCP client template", f"exegol-mcp {__version__}", "Bearer"):
+    for leak in (NOISE_MARKER, "MCP client config:", "serving on", "Bearer"):
         assert leak not in stdout, leak
 
     # The session really worked: a handshake, the tool list, and two tool calls answered on stdout.
@@ -160,9 +161,23 @@ async def test_stdio_sdk_and_logger_output_lands_on_stderr(tmp_path: Path) -> No
         for channel in channels:
             assert f"{NOISE_MARKER} {channel} {where}" in stderr, (channel, where, stderr)
     assert f"{NOISE_MARKER} bare-print tool-call" in stderr, stderr
-    # The startup banner and the client template are diagnostics in stdio mode: stderr only.
-    assert f"exegol-mcp {__version__}" in stderr
-    assert "MCP client template" in stderr
+    # D-30: a default stdio start prints no serving line (only -v does, and only on stderr).
+    assert "serving on" not in stderr
+    # D-31: a stdio start prints neither the client config nor the --print-config hint.
+    assert "MCP client config:" not in stderr
+    assert "--print-config" not in stderr
+
+
+async def test_a_default_stdio_start_prints_only_warnings_on_stderr(tmp_path: Path) -> None:
+    """D-30/D-31: without noise a default stdio session writes nothing on stderr but warnings and errors."""
+    session, code, stderr, _responses = await _run_noisy_stdio_session(tmp_path, noise=False)
+
+    assert code == 0, stderr
+    assert _non_json_rpc_lines(session.stdout_lines) == []
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    assert all(line.startswith(("[!] ", "[-] ")) for line in lines), stderr
+    assert "serving on" not in stderr
+    assert "MCP client config:" not in stderr
 
 
 def test_the_purity_check_rejects_a_non_json_rpc_line() -> None:

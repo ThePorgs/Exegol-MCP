@@ -89,8 +89,10 @@ def test_cli_help_has_no_planning_ids(monkeypatch: pytest.MonkeyPatch, capsys: p
         parse_args(["--help"])
     assert exc.value.code == 0
     help_text = capsys.readouterr().out
-    assert "--auth" in help_text
+    # D-32: --auth is accepted but not offered, so the help does not list it.
+    assert "--auth" not in help_text
     assert "--accept-eula" in help_text
+    assert "--print-config" in help_text
     hits = _hits(help_text, "exegol-mcp --help")
     assert not hits, _report(hits)
 

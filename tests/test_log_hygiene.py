@@ -1,7 +1,8 @@
 """SEC-02 credential log-hygiene (D-08): a password never reaches any stderr line at any verbosity.
 
 Docker-free: exec_remote_command runs against FakeExegolAdapter. The process stderr is redirected to an in-memory
-buffer (StderrHandler reads sys.stderr on every write, so it follows the redirect), configure_stderr_logging is run
+buffer (the ExeLogHandler's console resolves sys.stderr on every write, so it follows the redirect),
+configure_stderr_logging is run
 at -v 0..3, and every captured stderr line is greped for the sentinel password. The command is handled twice to
 cover the idempotency edge (a second handling must leak no more than the first).
 """
@@ -63,3 +64,14 @@ def test_sse_starlette_cap_is_targeted_at_debug_verbosity(monkeypatch: pytest.Mo
     assert SENTINEL_PW not in output
     assert "exegol-mcp debug kept" in output
     assert "mcp sdk debug kept" in output
+
+
+def test_a_debug_line_is_printed_once_and_verbatim_at_vvv(monkeypatch: pytest.MonkeyPatch) -> None:
+    buffer = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", buffer)
+    configure_stderr_logging(3)
+
+    # Square brackets in operator text stay literal (no markup in exegol-mcp's own records, D-01).
+    logging.getLogger("exegol_mcp.services.remote").debug("kept [x] line")
+
+    assert buffer.getvalue().splitlines().count("[D] kept [x] line") == 1, buffer.getvalue()

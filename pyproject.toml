@@ -21,6 +21,9 @@ dependencies = [
     "mcp>=2.3,<3",
     # config.yml is parsed directly with yaml.safe_load (CONF-03/CONF-04); already present transitively via exegol.
     "PyYAML>=6.0.3",
+    # The CLI's log handler, console and banner are built on rich directly (D-21); already present transitively via
+    # exegol, whose own pin is rich~=14.2.0.
+    "rich>=14.2,<15",
     # Use OS keyring only on Windows and macOS to avoid extra deps on Linux
     "keyring>=24; platform_system == 'Windows' or platform_system == 'Darwin'",
 ]

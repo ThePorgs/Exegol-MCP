@@ -825,6 +825,104 @@ def read_user_config_file(name: str) -> bytes | None:
     return data
 
 
+def peek_user_config_file(name: str) -> bytes | None:
+    """Read a file from exegol-mcp's config dir for reporting only; None when it (or the dir) does not exist.
+
+    Used by the read-only `version` action. It has the same no-follow and ownership refusals as
+    read_user_config_file, but it never tightens a mode, never creates the dir and never moves a file from the old
+    platform dir (G-05-1d), so looking cannot change anything.
+
+    Args:
+        name: File name inside the config dir (no path separators).
+
+    Returns:
+        The file content, or None.
+
+    Raises:
+        ValueError: If name is not a plain file name.
+        OSError: If the file cannot be read or is refused (UnsafeConfigPathError, or UnresolvedSudoError under sudo
+            on a platform where the invoking user is not resolved), like read_user_config_file.
+    """
+    _check_plain_name(name)
+    directory = user_config_dir()
+    if os.name == "posix":
+        read = _read_private_file_and_stat(directory, name, _owner_uid(), harden=False)
+        return None if read is None else read[0]
+    try:
+        return (directory / name).read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def peek_pending_adoption(name: str) -> tuple[bytes, Path] | None:
+    """Read a file that still sits in the old platform dir, for reporting only (G-05-1d).
+
+    Used by the read-only `version` action, so that an operator's `update_check: false` in a config.yml a server
+    start has not yet moved is still honoured. It applies pending_adoptions' test (the new dir lacks the file, the old
+    dir has it), reads through the hardened no-follow reader with harden=False, and never moves, removes, creates or
+    chmods anything.
+
+    Args:
+        name: One of ADOPTED_FILE_NAMES.
+
+    Returns:
+        (the file content, its old-dir path), or None when nothing is waiting under that name (or a start would
+        refuse the old dir: under an unresolved sudo).
+
+    Raises:
+        ValueError: If name is not a plain file name.
+        OSError: If the old file is refused (UnsafeConfigPathError) or cannot be read.
+    """
+    _check_plain_name(name)
+    if name not in {path.name for path in pending_adoptions()}:
+        return None
+    old_path = _platform_config_dir() / name
+    if os.name == "posix":
+        read = _read_private_file_and_stat(old_path.parent, name, _owner_uid(), harden=False)
+        return None if read is None else (read[0], old_path)
+    try:
+        return old_path.read_bytes(), old_path
+    except FileNotFoundError:
+        return None
+
+
+def pending_adoptions() -> list[Path]:
+    """The files in the old platform dir that the next server start would move into ~/.exegol-mcp (G-05-1d).
+
+    Used by the read-only `version -vvv` section. It applies the test _move_from_platform_dir applies, with lexists
+    only, so nothing is opened, read, created or moved (D-08).
+
+    Returns:
+        The old-dir paths of ADOPTED_FILE_NAMES that exist there while the new dir lacks the file; empty under an
+        unresolved sudo (a start would refuse there) or when both dirs are the same.
+    """
+    if os.name == "posix" and is_unresolved_sudo():
+        return []
+    new_dir = user_config_dir()
+    old_dir = _platform_config_dir()
+    if os.path.realpath(old_dir) == os.path.realpath(new_dir):
+        return []
+    return [
+        old_dir / name
+        for name in ADOPTED_FILE_NAMES
+        if os.path.lexists(old_dir / name) and not os.path.lexists(new_dir / name)
+    ]
+
+
+def secret_storage_location() -> str:
+    """Where load_bearer_secret(backend="auto") keeps the bearer secret, named without reading anything.
+
+    Never reads the keyring item or the secret file (D-09: nothing secret is printed): only the backend's name or the
+    file path appears.
+
+    Returns:
+        "keyring (<backend name>)" on Windows and macOS when keyring is available, else "file (<path>)".
+    """
+    if platform.system().lower() in ("windows", "darwin") and _is_keyring_available():
+        return f"keyring ({_get_keyring_backend_name()})"
+    return f"file ({secret_file_path()})"
+
+
 def load_bearer_secret(backend: str = "auto") -> tuple[str, bool, str | None]:
     """Load the bearer secret from secure storage (file or OS keyring), creating a new one on first run.
 

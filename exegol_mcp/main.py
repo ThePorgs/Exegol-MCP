@@ -2,18 +2,23 @@
 
 main() is the only thing here; everything it calls lives in exegol_mcp.bootstrap and exegol_mcp.adapter. It keeps
 the stable launch interface: the `exegol-mcp` console script, -t/--type, -p/--port, --auth, -pc/--print-config,
--v, and the defaults (HTTP on 127.0.0.1:2187/mcp).
+-v, and the defaults (HTTP on 127.0.0.1:2187/mcp). The read-only `version` action prints the versions and returns
+before anything below starts.
 
 Order matters (RESEARCH Pitfall 2, plan 04 notes):
 1. parse the command line;
-2. route every diagnostic to the standard error stream before any Exegol SDK module is imported (SEC-08);
+2. route every diagnostic to the standard error stream before any Exegol SDK module is imported (SEC-08), in the
+   Exegol wrapper's "[*] text" style, at the wrapper's verbosity levels (-v verbose, -vv advanced, -vvv debug);
+2b. `version`: print the read-only report and return (no self-check, config load, secret or gate);
 3. run the D-15 self-check, then route the SDK's console; a missing or renamed SDK name stops startup here with its
    named message on one stderr line (D-15, WR-12, WR-13);
-4. load the operator config;
+4. load the operator config (-v names the file in play);
 5. patch the SDK headless and apply --accept-eula;
 6. run the startup readiness gate (patch points/Docker/config/profiles/workspace allowlist/EULA), which may prompt
    for the EULA on a terminal;
-7. only then gather versions, print the banner, and start a transport.
+7. only then gather versions and start a transport. The serving line (the facts from -v) and the client config on the
+   first HTTP run only (a --print-config hint on later HTTP starts, nothing in stdio) print once HTTP has bound its
+   port (GR-IN-01), or right before stdio runs.
 
 Importing this module imports no exegol module (adapter/sudo.py and adapter/selfcheck.py import the SDK inside
 their functions), so no SDK import statement runs before step 3.
@@ -21,17 +26,18 @@ their functions), so no SDK import statement runs before step 3.
 
 import asyncio
 import logging
+import os
 import sys
 from argparse import Namespace
 
 from exegol_mcp.adapter import selfcheck  # loads no exegol module: assert_patch_points() imports them
 from exegol_mcp.adapter.errors import PatchPointError
 from exegol_mcp.app import build_server
-from exegol_mcp.bootstrap import secret_store, versions
+from exegol_mcp.bootstrap import secret_store, version_command, versions
 from exegol_mcp.bootstrap.cli import parse_args
-from exegol_mcp.bootstrap.config import ConfigError, load_operator_config, resolve
+from exegol_mcp.bootstrap.config import CONFIG_FILE_NAME, ConfigError, load_operator_config, resolve
 from exegol_mcp.bootstrap.lifecycle import ServerContext
-from exegol_mcp.bootstrap.logging_setup import configure_stderr_logging, route_logging_to_stderr
+from exegol_mcp.bootstrap.logging_setup import VERBOSE, configure_stderr_logging, route_logging_to_stderr
 from exegol_mcp.bootstrap.readiness import ReadinessError, ReadinessReport, check_readiness
 from exegol_mcp.bootstrap.transports import run_http, run_stdio
 
@@ -43,7 +49,8 @@ def _load_secret(args: Namespace) -> tuple[str | None, bool]:
     if args.type == "http" and args.auth == "bearer":
         secret, created, location = secret_store.load_bearer_secret()
         if location:
-            _log.debug(f"Bearer secret stored at '{location}'")
+            # An operator fact -v showed before (D-17): where the secret lives, never its value (SEC-02).
+            _log.log(VERBOSE, f"Bearer secret stored at '{location}'")
         return secret, created
     return None, False
 
@@ -55,6 +62,12 @@ def main(argv: list[str] | None = None) -> int:
     # 2. Diagnostics to stderr before any Exegol SDK module is imported, so Exegol's import-time logging setup finds
     # a root handler and never binds one to stdout (SEC-08).
     route_logging_to_stderr(args.verbose)
+
+    # 2b. `version` is read-only and runs before the self-check, the config load, the SDK patch, the secret and the
+    # readiness gate, so it works with Docker down, a broken config.yml or no EULA (D-08). Its report goes to stdout
+    # because no server runs, so stdout is not a protocol stream (R1).
+    if args.action == "version":
+        return version_command.run_version(args)
 
     # 3. The self-check runs before configure_stderr_logging imports sdk_headless and its module-level SDK imports,
     # so a missing SDK name is one named stderr line and exit status 1 (D-15, WR-13). Only PatchPointError is
@@ -74,6 +87,12 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as e:
         _log.error(str(e))
         return 1
+    # -v names the config file in play (D-17): a stat only, the content is never logged.
+    config_path = secret_store.user_config_dir() / CONFIG_FILE_NAME
+    if os.path.lexists(config_path):
+        _log.log(VERBOSE, f"Loaded the operator config from '{config_path}'")
+    else:
+        _log.log(VERBOSE, f"No operator config at '{config_path}': built-in defaults")
 
     # Resolve the mirrored launch keys with CLI > file > built-in default precedence (D-05/D-06), then write the
     # concrete transport/port/auth back onto the Namespace so the readiness gate, banner, client config and
@@ -122,12 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         versions.print_client_config(args, secret, created)
         return 0
 
-    versions.print_banner(args, collected)
-    versions.print_client_config(args, secret, created)
-
     update_checker = versions.UpdateChecker(enabled=bool(config.update_check))
-    update_checker.start()
-
     context = ServerContext(
         RealExegolAdapter(),
         collected,
@@ -139,9 +153,38 @@ def main(argv: list[str] | None = None) -> int:
     )
     server = build_server(config, context)
 
+    announced = False
+
+    def announce_start() -> None:
+        """Print what a start says (the serving line, the facts, the client config) and start the update check."""
+        nonlocal announced
+        announced = True
+        versions.print_banner(args, collected, update_check=bool(config.update_check))
+        versions.print_startup_client_config(args, secret, created)
+        update_checker.start()
+
     if args.type == "http":
-        run_http(server, port=args.port, auth=args.auth, secret=secret, allow_no_auth=config.security.allow_no_auth)
+        # GR-IN-01: the serving line and the first-run token are printed once the port is bound, never before: a
+        # start that cannot bind prints the bind error and neither of them. D-30 hides uvicorn's own "running on"
+        # line at the default level, so this line is the one success statement a start makes.
+        try:
+            run_http(
+                server,
+                port=args.port,
+                auth=args.auth,
+                secret=secret,
+                allow_no_auth=config.security.allow_no_auth,
+                verbose=args.verbose,
+                on_bound=announce_start,
+            )
+        finally:
+            if created and not announced:
+                # The secret was created by this start but its first-run block never printed (a later start is not
+                # "created" any more): point at --print-config, which prints the entry with the token.
+                versions.print_unshown_secret_hint(args)
     elif args.type == "stdio":
+        # Nothing to bind: stdio prints at once (nothing at the default level, SEC-08), before the server runs.
+        announce_start()
         run_stdio(server)
     else:  # pragma: no cover - argparse restricts --type to the two choices
         raise NotImplementedError(f"Unknown server type: {args.type}")

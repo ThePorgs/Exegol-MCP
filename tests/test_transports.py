@@ -29,10 +29,11 @@ from mcp.client.streamable_http import streamable_http_client
 from exegol_mcp.app import build_server
 from exegol_mcp.bootstrap import transports
 from exegol_mcp.bootstrap.cli import DEFAULT_PORT, HTTP_HOST, MCP_PATH, parse_args
-from exegol_mcp.bootstrap.transports import UVICORN_LOG_CONFIG, build_http_app, run_http
+from exegol_mcp.bootstrap.transports import build_http_app, run_http, uvicorn_log_config
 from tests.fake_server import REPO_ROOT, launcher_command, server_env, stdio_server_parameters
 from tests.fakes import V2_TOOL_NAMES, FakeExegolAdapter, catalog_router
 from tests.http_harness import free_port, serve_in_thread
+from tests.test_sdk_selfcheck import _run_python
 
 SECRET = "transport-test-secret"
 ERAS = ["legacy", "2026-07-28"]
@@ -108,20 +109,144 @@ def test_the_default_launch_is_http_on_localhost_2187_mcp_with_bearer_auth() -> 
     )
 
 
-def test_run_http_serves_the_bearer_gated_app_on_localhost_only(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def recorded_http_run(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Replace the uvicorn server run run_http() starts with a recorder of the Config it was built with.
+
+    The Config's own logging step (dictConfig) is skipped: it would shut down pytest's live handlers.
+    """
     captured: dict[str, Any] = {}
+    monkeypatch.setattr(transports.uvicorn.Config, "configure_logging", lambda self: None)
 
-    def fake_uvicorn_run(app: Any, **kwargs: Any) -> None:
-        captured["app"] = app
-        captured.update(kwargs)
+    def fake_run(self: Any, sockets: Any = None) -> None:
+        captured["app"] = self.config.app
+        captured["host"] = self.config.host
+        captured["port"] = self.config.port
+        captured["log_config"] = self.config.log_config
+        self.started = True
 
-    monkeypatch.setattr(transports.uvicorn, "run", fake_uvicorn_run)
+    monkeypatch.setattr(transports._AnnouncingServer, "run", fake_run)
+    return captured
+
+
+def test_run_http_serves_the_bearer_gated_app_on_localhost_only(recorded_http_run: dict[str, Any]) -> None:
     run_http(build_server(None, FakeExegolAdapter()), port=DEFAULT_PORT, auth="bearer", secret=SECRET)
 
-    assert captured["host"] == "127.0.0.1"
-    assert captured["port"] == 2187
-    assert captured["log_config"] is UVICORN_LOG_CONFIG
-    assert type(captured["app"]).__name__ == "BearerGate"
+    assert recorded_http_run["host"] == "127.0.0.1"
+    assert recorded_http_run["port"] == 2187
+    assert recorded_http_run["log_config"] == uvicorn_log_config(0)
+    assert type(recorded_http_run["app"]).__name__ == "BearerGate"
+
+
+@pytest.mark.parametrize(("verbose", "level"), [(0, "WARNING"), (1, "INFO"), (2, "INFO"), (3, "INFO")])
+def test_uvicorn_logging_config_leaves_records_to_the_root_handler(verbose: int, level: str) -> None:
+    config = uvicorn_log_config(verbose)
+
+    assert "handlers" not in config
+    assert "formatters" not in config
+    assert config["disable_existing_loggers"] is False
+    loggers = config["loggers"]
+    assert set(loggers) == {"uvicorn", "uvicorn.error", "uvicorn.access"}
+    for name, settings in loggers.items():
+        assert settings == {"level": level, "propagate": True}, name
+
+
+def test_run_http_hands_uvicorn_the_verbosity_it_was_given(recorded_http_run: dict[str, Any]) -> None:
+    run_http(build_server(None, FakeExegolAdapter()), port=DEFAULT_PORT, auth="bearer", secret=SECRET, verbose=2)
+
+    assert recorded_http_run["log_config"] == uvicorn_log_config(2)
+
+
+def test_run_http_calls_the_bound_hook_only_once_the_port_is_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GR-IN-01: the hook runs with the port already accepting connections, then the server leaves its loop."""
+    monkeypatch.setattr(transports, "uvicorn_log_config", lambda verbose: None)
+
+    async def stop_at_once(self: Any) -> None:
+        return None
+
+    monkeypatch.setattr(transports._AnnouncingServer, "main_loop", stop_at_once)
+    port = free_port()
+    reachable: list[bool] = []
+
+    def on_bound() -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(2)
+            reachable.append(probe.connect_ex((HTTP_HOST, port)) == 0)
+
+    run_http(build_server(None, FakeExegolAdapter()), port=port, auth="bearer", secret=SECRET, on_bound=on_bound)
+
+    assert reachable == [True]
+
+
+def test_run_http_does_not_call_the_bound_hook_when_the_port_is_taken(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(transports, "uvicorn_log_config", lambda verbose: None)
+    calls: list[str] = []
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as holder:
+        holder.bind((HTTP_HOST, 0))
+        holder.listen()
+        port = int(holder.getsockname()[1])
+
+        with pytest.raises(SystemExit) as exc:
+            run_http(
+                build_server(None, FakeExegolAdapter()),
+                port=port,
+                auth="bearer",
+                secret=SECRET,
+                on_bound=lambda: calls.append("bound"),
+            )
+
+    assert exc.value.code == 3
+    assert calls == []
+
+
+def test_run_http_warns_nothing_about_no_auth_itself(
+    caplog: pytest.LogCaptureFixture, recorded_http_run: dict[str, Any]
+) -> None:
+    """GR-IN-02: the one no-auth warning is the startup output's, which names the config key."""
+    with caplog.at_level("WARNING"):
+        run_http(
+            build_server(None, FakeExegolAdapter()), port=DEFAULT_PORT, auth="none", secret=None, allow_no_auth=True
+        )
+
+    assert "DISABLED" not in caplog.text
+    assert type(recorded_http_run["app"]).__name__ != "BearerGate"
+
+
+# The real configuration step uvicorn.run performs (logging.config.dictConfig), in an isolated interpreter: dictConfig
+# shuts down the live handlers, which would break pytest's own in the test process. The -v count is argv[1].
+_UVICORN_SCRIPT = """
+import logging
+import logging.config
+import sys
+
+from exegol_mcp.bootstrap.logging_setup import route_logging_to_stderr
+from exegol_mcp.bootstrap.transports import uvicorn_log_config
+
+verbose = int(sys.argv[1])
+route_logging_to_stderr(verbose)
+logging.config.dictConfig(uvicorn_log_config(verbose))
+logging.getLogger("uvicorn.error").info("Uvicorn running on http://127.0.0.1:2187")
+logging.getLogger("uvicorn.error").error("Could not bind port 2187")
+logging.getLogger("uvicorn.access").debug("access-debug-hidden")
+logging.getLogger("uvicorn.access").info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5555", "POST", "/mcp", "1.1", 200)
+"""
+
+
+@pytest.mark.parametrize("verbose", [0, 1, 3])
+def test_uvicorn_lines_reach_the_root_handler_once(tmp_path: Path, verbose: int) -> None:
+    result = _run_python(tmp_path, _UVICORN_SCRIPT, str(verbose))
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    lines = result.stderr.splitlines()
+    startup = "[*] Uvicorn running on http://127.0.0.1:2187"
+    access = '[*] 127.0.0.1:5555 - "POST /mcp HTTP/1.1" 200'
+    # A bind error is a warning-level problem: it prints at every verbosity, exactly once.
+    assert sum("Could not bind port 2187" in line for line in lines) == 1, result.stderr
+    # The startup and access lines are -v detail (D-30).
+    assert lines.count(startup) == (1 if verbose >= 1 else 0), result.stderr
+    assert lines.count(access) == (1 if verbose >= 1 else 0), result.stderr
+    assert "access-debug-hidden" not in result.stderr
 
 
 def test_http_app_keeps_the_streaming_response_for_cancellation_and_progress(
@@ -219,12 +344,10 @@ async def test_http_only_the_mcp_path_is_served() -> None:
     assert response.status_code == 404
 
 
-async def test_http_the_app_run_http_builds_answers_mcp(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_http_the_app_run_http_builds_answers_mcp(recorded_http_run: dict[str, Any]) -> None:
     """The very app run_http() would hand to uvicorn, served for real, accepts a bearer client."""
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(transports.uvicorn, "run", lambda app, **_kwargs: captured.setdefault("app", app))
     run_http(build_server(None, FakeExegolAdapter()), port=DEFAULT_PORT, auth="bearer", secret=SECRET)
-    with serve_in_thread(captured["app"]) as port:
+    with serve_in_thread(recorded_http_run["app"]) as port:
         names, _structured = await _connect_and_call(_url(port), "legacy")
         _assert_all_rejected_with_400(await _rejected_statuses(_url(port)))
     assert names == V2_TOOL_NAMES

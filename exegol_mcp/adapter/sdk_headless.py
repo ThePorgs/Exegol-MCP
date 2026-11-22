@@ -34,10 +34,10 @@ from exegol.utils.ContainerLogStream import ContainerLogStream
 # The SDK imports DockerUtils locally inside ExegolContainer.remove to dodge its own circular import; sdk_headless sits
 # outside that cycle. The removal mirror calls this module-level name, which tests replace.
 from exegol.utils.DockerUtils import DockerUtils
-from exegol.utils.ExeLog import ExeLog, logger
+from exegol.utils.ExeLog import logger
 from exegol.utils.MetaSingleton import MetaSingleton
-from rich.console import Console
 
+from exegol_mcp.adapter import sdk_logging
 from exegol_mcp.adapter.download_progress import download_docker_layer
 from exegol_mcp.adapter.errors import (
     ContainerNameConflictError,
@@ -47,6 +47,7 @@ from exegol_mcp.adapter.errors import (
 from exegol_mcp.adapter.exec import _docker_handle
 from exegol_mcp.adapter.offload import run_blocking
 from exegol_mcp.adapter.selfcheck import _broken, assert_patch_points
+from exegol_mcp.bootstrap.logging_setup import stderr_console
 
 _log = logging.getLogger(__name__)
 
@@ -851,34 +852,13 @@ def _stdin_cannot_answer() -> bool:
 
 
 def _route_console_to_stderr() -> None:
-    """Send everything the SDK prints or logs to stderr.
+    """Send everything the SDK prints or logs to stderr, through the process's shared stderr console.
 
-    The SDK's root RichHandler captured the original stdout console at import time, so it is repointed too.
-    Console(stderr=True) resolves sys.stderr on every write, so it follows any later stream redirection.
+    Reuses bootstrap.logging_setup's console rather than building a separate one: a second console would diverge
+    from the log handler (no soft wrap, its own colour decision). Console(stderr=True) resolves sys.stderr on every
+    write, so it follows any later stream redirection.
     """
-    previous = ExeLog.console
-    console = Console(stderr=True)
-    ExeLog.console = console
-    for handler in logging.getLogger().handlers:
-        if getattr(handler, "console", None) is previous:
-            handler.console = console  # type: ignore[attr-defined]
-
-
-def route_sdk_output_to_stderr() -> str:
-    """Send the SDK's console to stderr ahead of the full patch, for the bootstrap logging setup (SEC-08).
-
-    bootstrap.logging_setup calls this so it never imports exegol itself. Idempotent.
-
-    Returns:
-        The name of the SDK's logger, whose records carry rich markup.
-    """
-    _route_console_to_stderr()
-    return logger.name
-
-
-def set_sdk_verbosity(verbose: int) -> None:
-    """Apply the operator's -v count to the SDK's logger, with the SDK's own level mapping."""
-    ExeLog.setVerbosity(verbose)
+    sdk_logging.route_console(stderr_console())
 
 
 def patch_exegol_sdk() -> None:

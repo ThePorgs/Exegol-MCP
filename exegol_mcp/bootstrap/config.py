@@ -87,7 +87,9 @@ def _resolve_workspace_allowlist(cfg: OperatorConfig) -> OperatorConfig:
 def load_operator_config() -> OperatorConfig:
     """Read config.yml and validate it into an OperatorConfig.
 
-    A missing or empty file yields OperatorConfig() built-in defaults (D-03). The file is never written.
+    A missing or empty file yields OperatorConfig() built-in defaults (D-03). The file is never written. The read
+    adopts a file from the old platform dir and hardens modes, as the server start does; the read-only `version`
+    action peeks and calls parse_operator_config itself.
 
     Returns:
         The parsed, validated config, or the all-defaults config when no usable file is present.
@@ -100,7 +102,23 @@ def load_operator_config() -> OperatorConfig:
         raw = secret_store.read_user_config_file(CONFIG_FILE_NAME)
     except OSError as e:
         raise ConfigError(f"{CONFIG_FILE_NAME} could not be read: {e}") from e
+    return parse_operator_config(raw)
 
+
+def parse_operator_config(raw: bytes | None) -> OperatorConfig:
+    """Validate the content of config.yml into an OperatorConfig: the half of loading that follows the read.
+
+    Shared by load_operator_config (which reads with adoption) and the `version` action (which only peeks).
+
+    Args:
+        raw: The file content, or None / empty when there is no file.
+
+    Returns:
+        The parsed, validated config, or the all-defaults config for an absent or empty file.
+
+    Raises:
+        ConfigError: The content is not valid YAML or fails validation, naming the first offending field.
+    """
     if not raw:
         return _resolve_workspace_allowlist(OperatorConfig())  # absent or empty -> all defaults (D-03)
 

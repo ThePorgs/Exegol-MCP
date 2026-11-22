@@ -7,6 +7,7 @@ touches the real Docker daemon, ~/.exegol or the bearer secret.
 import errno
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -17,11 +18,12 @@ from argparse import Namespace
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 
 from exegol_mcp import __version__
 from exegol_mcp.adapter import mount_paths, selfcheck
 from exegol_mcp.adapter.port import ConfigStatus, ExegolMountDir, HostProbe
-from exegol_mcp.bootstrap import eula, readiness, secret_store, versions
+from exegol_mcp.bootstrap import eula, logging_setup, readiness, secret_store, versions
 from exegol_mcp.bootstrap.cli import parse_args
 
 # --- Fakes ----------------------------------------------------------------------------------------------------------
@@ -488,32 +490,118 @@ def test_versions_no_wrapper_on_the_path_is_none(tmp_path) -> None:
     assert versions.detect_wrapper_version(which=lambda _name: str(tmp_path / "missing")) is None
 
 
-def test_banner_stdio_mode_writes_to_stderr_only(capsys: pytest.CaptureFixture) -> None:
+def test_banner_stdio_mode_is_silent_by_default_and_verbose_facts_go_to_stderr(
+    capsys: pytest.CaptureFixture,
+) -> None:
     versions.print_banner(_args("--type", "stdio"), _versions(wrapper="6.0.1"))
+    silent = capsys.readouterr()
+    assert (silent.out, silent.err) == ("", "")
+
+    versions.print_banner(_args("--type", "stdio", "-v"), _versions(wrapper="6.0.1"))
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "exegol-mcp 2.0.0" in captured.err
-    assert "6.0.1" in captured.err
-    assert "information only" in captured.err
-    assert "reachable (Docker 29.8.2)" in captured.err
-    assert "/home/user/.exegol" in captured.err
-    assert "stdio" in captured.err
+    assert captured.err.splitlines() == [
+        "[V] Exegol MCP v2.0.0 serving on stdio",
+        "[V] Exegol library: 6.0.2",
+        "[V] Exegol wrapper: 6.0.1 (differs from the bundled library: information only)",
+        "[V] Docker: reachable (Docker 29.8.2)",
+        "[V] Config dirs: /home/user/.exegol, /home/user/.config/exegol-mcp",
+        "[V] Update check: in the background",
+    ]
 
 
 def test_banner_stdio_console_is_stderr_and_http_console_is_stdout() -> None:
     assert versions.banner_console(_args("--type", "stdio")).stderr is True
+    assert versions.banner_console(_args("--type", "stdio")) is logging_setup.stderr_console()
     assert versions.banner_console(_args("--type", "http")).stderr is False
 
 
-def test_banner_http_mode_prints_to_the_console_with_the_endpoint(capsys: pytest.CaptureFixture) -> None:
+def test_banner_http_mode_prints_one_serving_line(capsys: pytest.CaptureFixture) -> None:
     # main() writes the resolved transport/port/auth back onto the Namespace before the banner, so the banner
     # always sees concrete values (the mirrored flags now default to None).
-    versions.print_banner(_args("--type", "http", "--port", "4242", "--auth", "bearer", "--no-update-check"), _versions())
+    versions.print_banner(_args("--type", "http", "--port", "4242", "--auth", "bearer"), _versions())
 
-    out = capsys.readouterr().out
-    assert "http://127.0.0.1:4242/mcp (bearer auth)" in out
-    assert "disabled (--no-update-check)" in out
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.splitlines() == ["[*] Exegol MCP v2.0.0 serving on http://127.0.0.1:4242/mcp (bearer auth)"]
+
+    no_auth = _args("--type", "http", "--port", "4242")
+    no_auth.auth = "none"  # what the security.allow_no_auth config key resolves to
+    versions.print_banner(no_auth, _versions())
+
+    assert capsys.readouterr().out.splitlines() == [
+        "[*] Exegol MCP v2.0.0 serving on http://127.0.0.1:4242/mcp (no auth)"
+    ]
+
+
+def test_serving_line_styles_only_the_url_as_a_link() -> None:
+    line = versions.serving_line(_args("--type", "http", "--port", "4242", "--auth", "bearer"), "2.0.0")
+
+    url = "http://127.0.0.1:4242/mcp"
+    start = line.plain.index(url)
+    styled = [(span.start, span.end, str(span.style)) for span in line.spans]
+    assert (start, start + len(url), versions.LINK_STYLE) in styled
+    assert not any(span.end > start + len(url) for span in line.spans)  # "(bearer auth)" stays plain
+
+    terminal = io.StringIO()
+    Console(file=terminal, force_terminal=True, color_system="standard", width=200).print(line)
+    assert "\x1b[4;35m" + url in terminal.getvalue()  # underline magenta on a terminal
+    plain = io.StringIO()
+    Console(file=plain, width=200).print(line)
+    assert plain.getvalue() == f"Exegol MCP v2.0.0 serving on {url} (bearer auth)\n"  # no colour off a terminal
+
+
+def test_banner_facts_are_verbose_lines_on_http_too(capsys: pytest.CaptureFixture) -> None:
+    versions.print_banner(_args("--type", "http", "--port", "4242", "--auth", "bearer", "-v"), _versions())
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.splitlines() == [
+        "[*] Exegol MCP v2.0.0 serving on http://127.0.0.1:4242/mcp (bearer auth)",
+        "[V] Exegol library: 6.0.2",
+        "[V] Docker: reachable (Docker 29.8.2)",
+        "[V] Config dirs: /home/user/.exegol, /home/user/.config/exegol-mcp",
+        "[V] Update check: in the background",
+    ]
+
+
+def test_banner_lines_are_unpadded_wrapper_lines_at_a_narrow_width(
+    capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "20")
+    for name in ("FORCE_COLOR", "TTY_COMPATIBLE", "NO_COLOR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(logging_setup, "_console", logging_setup.make_stderr_console())
+
+    versions.print_banner(_args("--type", "stdio", "-v"), _versions(wrapper="6.0.1"))
+
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 6
+    for line in lines:
+        assert line.startswith("[V] "), line
+        assert not line.endswith(" "), line
+        assert not any("\u2500" <= character <= "\u257f" for character in line), line
+    assert "[V] Config dirs: /home/user/.exegol, /home/user/.config/exegol-mcp" in lines
+
+
+def test_banner_shows_the_wrapper_only_when_it_differs(capsys: pytest.CaptureFixture) -> None:
+    versions.print_banner(_args("--type", "stdio", "-v"), _versions(wrapper="6.0.2"))
+    assert "Exegol wrapper" not in capsys.readouterr().err
+
+    versions.print_banner(_args("--type", "stdio", "-vvv"), _versions(wrapper="6.0.2"))
+    assert "[V] Exegol wrapper: 6.0.2" in capsys.readouterr().err.splitlines()
+
+    versions.print_banner(_args("--type", "stdio", "-v"), _versions(wrapper=None))
+    assert "[V] Exegol wrapper: not detected" in capsys.readouterr().err.splitlines()
+
+
+def test_banner_update_check_fact_follows_the_config(capsys: pytest.CaptureFixture) -> None:
+    versions.print_banner(_args("--type", "stdio", "-v", "--no-update-check"), _versions())
+    assert "[V] Update check: disabled (--no-update-check)" in capsys.readouterr().err.splitlines()
+
+    versions.print_banner(_args("--type", "stdio", "-v"), _versions(), update_check=False)
+    assert "[V] Update check: disabled (update_check: false in config.yml)" in capsys.readouterr().err.splitlines()
 
 
 def test_banner_client_template_redacts_the_secret_unless_asked_or_new() -> None:
@@ -874,17 +962,6 @@ def test_comp03_no_auth_warning_names_the_config_key(caplog: pytest.LogCaptureFi
     assert "mode: none" not in caplog.text
 
 
-def test_banner_print_client_config_is_a_plain_copyable_block(capsys: pytest.CaptureFixture) -> None:
-    versions.print_client_config(
-        _args("--type", "http", "--port", "2187", "--auth", "bearer", "--print-config"), "s3cr3t", created=False
-    )
-
-    out = capsys.readouterr().out
-    assert out.startswith("MCP client template:\n")
-    assert '"Authorization": "Bearer s3cr3t"' in out
-    assert "\x1b[" not in out
-
-
 def test_update_check_a_failing_fetch_never_raises_and_gives_no_notice(config_home) -> None:
     def offline(_timeout: float) -> str | None:
         raise OSError("Network is unreachable")
@@ -902,6 +979,39 @@ def test_update_check_swallows_every_fetch_error(config_home, error: Exception) 
         raise error
 
     assert versions.UpdateChecker(enabled=True, fetch=failing).check() is None
+
+
+def test_update_check_messages_use_the_wrapper_levels(config_home, caplog: pytest.LogCaptureFixture) -> None:
+    def offline(_timeout: float) -> str | None:
+        raise OSError("Network is unreachable")
+
+    def broken_which(_name: str) -> str | None:
+        raise OSError("which failed")
+
+    def unwritable(_name: str, _data: bytes):
+        raise PermissionError("read-only home")
+
+    with caplog.at_level(logging.DEBUG, logger="exegol_mcp"):
+        versions.UpdateChecker(enabled=True, fetch=offline).check()
+        versions.detect_wrapper_version(which=broken_which)
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(secret_store, "write_user_config_file", unwritable)
+            versions.UpdateChecker(enabled=True, current="2.0.0", fetch=lambda _t: "2.1.0").check()
+
+    levels = {record.getMessage().split(":")[0]: record.levelno for record in caplog.records}
+    assert levels["Update check skipped"] == logging_setup.VERBOSE == 15
+    assert levels["Could not detect the Exegol wrapper version"] == logging_setup.ADVANCED == 13
+    assert levels["Could not cache the update check result"] == logging_setup.ADVANCED
+
+
+def test_the_update_notice_is_a_warning(config_home, caplog: pytest.LogCaptureFixture) -> None:
+    """D-30: an update is one of the warnings a default start shows, in stdio too."""
+    with caplog.at_level(logging.INFO, logger="exegol_mcp"):
+        notice = versions.UpdateChecker(enabled=True, current="2.0.0", fetch=lambda _t: "2.1.0").check()
+
+    assert notice is not None
+    records = [record for record in caplog.records if record.getMessage() == notice]
+    assert [record.levelno for record in records] == [logging.WARNING]
 
 
 def test_update_check_opt_out_short_circuits_without_fetching(config_home) -> None:

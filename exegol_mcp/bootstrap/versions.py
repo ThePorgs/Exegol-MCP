@@ -1,8 +1,14 @@
-"""Startup banner (D-10), server_info data (D-13) and the background update check (D-11).
+"""Startup output (D-10, D-30, D-31), server_info data (D-13) and the background update check (D-11).
 
-The banner looks like `exegol info`: exegol-mcp version, bundled Exegol library version, host wrapper version when
-it can be detected, Docker status and config dirs. It goes to the console (stdout) in HTTP mode and to the
-standard error stream only in stdio mode, where stdout carries the protocol (SEC-08).
+A start prints one line, "[*] Exegol MCP vX serving on <endpoint> (<auth> auth)", plus any warnings (D-30). The facts
+behind it (bundled Exegol library, the host wrapper when it differs, Docker status, config dirs, update check) are
+"[V] Label: value" lines from -v, without a table or box characters. The line goes to the console (stdout) in HTTP
+mode; a stdio start prints nothing at the default level and its -v lines go to the standard error stream only, where
+stdout carries the protocol (SEC-08).
+
+The client config entry is printed highlighted on a terminal and raw elsewhere, byte-identical once colour is removed
+(D-29). A start prints it only the first time, when the bearer secret was just created; later HTTP starts print a hint
+to run --print-config, and a stdio start prints neither (D-31).
 
 A wrapper/library version difference is information, never a warning or a failure (D-07/D-12): the banner and
 server_info show it as a compatibility state.
@@ -29,12 +35,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.console import Console
-from rich.table import Table
+from rich.highlighter import JSONHighlighter
 from rich.text import Text
 
 from exegol_mcp import __version__
 from exegol_mcp.bootstrap import secret_store
-from exegol_mcp.bootstrap.cli import HTTP_HOST, MCP_PATH
+from exegol_mcp.bootstrap.cli import DEFAULT_PORT, HTTP_HOST, MCP_PATH
+from exegol_mcp.bootstrap.logging_setup import ADVANCED, VERBOSE, prefixed_line, stderr_console
 from exegol_mcp.services.server_info import VersionReport, compatibility_state
 
 PYPI_JSON_URL = "https://pypi.org/pypi/exegol-mcp/json"
@@ -120,7 +127,7 @@ def detect_wrapper_version(which: Callable[[str], str | None] = shutil.which) ->
             if version:
                 return version
     except (OSError, ValueError) as e:
-        _log.debug(f"Could not detect the Exegol wrapper version: {e}")
+        _log.log(ADVANCED, f"Could not detect the Exegol wrapper version: {e}")
     return None
 
 
@@ -159,44 +166,119 @@ def server_info_report(versions: Versions, docker_status: str, update_notice: st
 def banner_console(args: Namespace) -> Console:
     """The console the banner goes to: stdout in HTTP mode, the standard error stream only in stdio mode."""
     if args.type == "stdio":
-        # stdout is the MCP protocol stream in stdio mode (SEC-08).
-        return Console(stderr=True)
-    return Console()
+        # stdout is the MCP protocol stream in stdio mode (SEC-08); the process's shared stderr console.
+        return stderr_console()
+    # Soft wrap: a long path or URL is never broken across lines; rich decides colour from the stream (D-04).
+    return Console(soft_wrap=True)
 
 
-def _endpoint(args: Namespace) -> str:
-    if args.type == "stdio":
-        return "stdio"
-    return f"http://{HTTP_HOST}:{args.port}{MCP_PATH} ({args.auth} auth)"
+# The wrapper's version colour: UpdateManager.display_current_version prints every version as `[blue]v...[/blue]`.
+# Every version value of the report and the banner uses it, so a version is recognisable at a glance (D-26).
+VERSION_STYLE = "blue"
+# The wrapper's link style (ExegolManager.print_version: "[underline magenta]{landing}[/underline magenta]").
+LINK_STYLE = "underline magenta"
 
 
-def _wrapper_line(versions: Versions) -> str:
+def version_text(value: str | None) -> Text:
+    """A version value in the version colour; a missing one is the plain word "unknown" (not a version)."""
+    if value is None:
+        return Text("unknown")
+    return Text(value, style=VERSION_STYLE)
+
+
+def wrapper_text(versions: Versions) -> Text:
+    """The "Exegol wrapper" value: its version, "not detected", or a version with the information-only wording."""
     if versions.exegol_wrapper is None:
-        return "not detected"
+        return Text("not detected")
     if versions.compatibility == "mismatch":
-        return f"{versions.exegol_wrapper} (differs from the bundled library: information only)"
-    return versions.exegol_wrapper
+        # assemble keeps the wording plain: appending to a Text built with a style would colour it as well.
+        return Text.assemble(
+            (versions.exegol_wrapper, VERSION_STYLE), " (differs from the bundled library: information only)"
+        )
+    return version_text(versions.exegol_wrapper)
 
 
-def print_banner(args: Namespace, versions: Versions, console: Console | None = None) -> None:
-    """Print the startup banner (D-10) on the console for this transport (stderr only in stdio mode)."""
+def show_wrapper_line(versions: Versions, *, verbose: int) -> bool:
+    """Whether the "Exegol wrapper" line is worth printing (D-26).
+
+    The bundled library is what runs, so the wrapper line matters only when it differs from it or cannot be found.
+    A wrapper that matches the library is hidden, except at -vvv, which always shows both for a bug report.
+
+    Args:
+        versions: The detected versions.
+        verbose: The -v count.
+
+    Returns:
+        False only when the wrapper matches the library and the count is below 3.
+    """
+    return verbose >= 3 or versions.compatibility != "match"
+
+
+def version_headline(version: str) -> Text:
+    """The wrapper's "Exegol MCP is currently in version vX" line, the version in blue as `exegol version` shows it."""
+    return prefixed_line(logging.INFO, "Exegol MCP is currently in version ", version_text(f"v{version}"))
+
+
+def serving_line(args: Namespace, version: str) -> Text:
+    """The one line a start prints: "Exegol MCP vX serving on <endpoint>" (D-30), with the INFO prefix left to the caller.
+
+    Args:
+        args: The resolved arguments (transport, port, auth).
+        version: The exegol-mcp version, without the "v".
+
+    Returns:
+        "Exegol MCP vX serving on stdio", or "... on http://127.0.0.1:<port>/mcp (bearer auth)" / "(no auth)".
+    """
+    if args.type == "stdio":
+        return Text.assemble("Exegol MCP ", version_text(f"v{version}"), " serving on stdio")
+    # The URL is styled like the wrapper's links (underline magenta); the colour is dropped off a terminal.
+    url = f"http://{HTTP_HOST}:{args.port}{MCP_PATH}"
+    auth = f" ({'no' if args.auth == 'none' else args.auth} auth)"
+    return Text.assemble("Exegol MCP ", version_text(f"v{version}"), " serving on ", (url, LINK_STYLE), auth)
+
+
+def print_banner(
+    args: Namespace, versions: Versions, *, update_check: bool = True, console: Console | None = None
+) -> None:
+    """Print what a start prints (D-30): one serving line, and the facts as VERBOSE lines from -v.
+
+    An HTTP start prints "[*] Exegol MCP vX serving on <endpoint> (<auth> auth)" at every verbosity. A stdio start
+    prints nothing at the default level (a log panel is not a banner) and the same line as a VERBOSE line from -v, on
+    the standard error stream only (SEC-08). From -v the facts follow as "[V] Label: value" lines: the Exegol library,
+    the wrapper only when it differs from the library (D-26; always at -vvv), Docker, the config dirs and the update
+    check. Values are Text, never markup: paths and versions are printed as they are. There is no table, border or
+    padding (D-06).
+
+    Args:
+        args: The resolved arguments.
+        versions: What the readiness gate and the version probes found.
+        update_check: Whether config.yml leaves the background update check on (--no-update-check is read here).
+        console: The console to print to; the transport's own by default.
+    """
     console = console or banner_console(args)
-    table = Table.grid(padding=(0, 2))
-    table.add_column(style="bold")
-    table.add_column()
-    rows = [
-        ("Exegol library", versions.exegol_library or "unknown"),
-        ("Exegol wrapper", _wrapper_line(versions)),
+    line = serving_line(args, versions.exegol_mcp)
+    if args.type != "stdio":
+        console.print(prefixed_line(logging.INFO, line))
+    if args.verbose < 1:
+        return
+    if args.type == "stdio":
+        console.print(prefixed_line(VERBOSE, line))
+    if args.no_update_check:
+        update = "disabled (--no-update-check)"
+    elif not update_check:
+        update = "disabled (update_check: false in config.yml)"
+    else:
+        update = "in the background"
+    rows: list[tuple[str, str | Text]] = [("Exegol library", version_text(versions.exegol_library))]
+    if show_wrapper_line(versions, verbose=args.verbose):
+        rows.append(("Exegol wrapper", wrapper_text(versions)))
+    rows += [
         ("Docker", versions.docker_status),
         ("Config dirs", ", ".join(versions.config_dirs)),
-        ("Endpoint", _endpoint(args)),
-        ("Update check", "disabled (--no-update-check)" if args.no_update_check else "in the background"),
+        ("Update check", update),
     ]
     for label, value in rows:
-        # Text, not markup: paths and versions are printed as they are.
-        table.add_row(label, Text(value))
-    console.print(Text(f"exegol-mcp {versions.exegol_mcp}", style="bold"))
-    console.print(table)
+        console.print(prefixed_line(VERBOSE, f"{label}: ", value))
 
 
 # --------------- MCP client config ---------------
@@ -273,7 +355,8 @@ def client_config_template(args: Namespace, secret: str | None, created: bool) -
     The stdio entry launches this environment's exegol-mcp console script, which keeps the MCP client's working
     directory off the server's import path (stdio_launch, CR-04); without one, it prints a python launch that also
     keeps that directory off the path (-P on 3.11+, the -c launcher on 3.10; stdio_launch, WR-16). The bearer secret
-    is shown only with --print-config or right after it was created; otherwise it is redacted.
+    is shown only with --print-config or right after it was created; otherwise it is redacted (defense in depth: no
+    CLI path reaches the redacted form any more, because the startup block prints only with a new secret).
     """
     entry: dict[str, object]
     if args.type == "stdio":
@@ -287,22 +370,30 @@ def client_config_template(args: Namespace, secret: str | None, created: bool) -
     return f'"exegol-mcp": {json.dumps(entry, indent=4)}'
 
 
-def print_client_config(args: Namespace, secret: str | None, created: bool, console: Console | None = None) -> None:
-    """Print the client config template block (at startup, or for --print-config, which then exits).
+def write_copyable_block(console: Console, block: str) -> None:
+    """Write a block an operator copies (the client config entry) to the console's stream, copy-safe.
 
-    --print-config is a CLI output path, so the block goes to stdout. At startup it follows the banner: stdout in
-    HTTP mode, the standard error stream in stdio mode, where stdout is the protocol stream (SEC-08).
+    The copy-safety contract (D-12, D-29): the characters are exactly the block's. Highlighting adds colour only, so
+    with every SGR sequence removed the output is byte-identical to the block at any terminal width: no wrap, crop,
+    padding, trailing space or border. On a colour terminal the JSON is highlighted (JSONHighlighter over the exact
+    text, soft wrap on, markup, emoji and the console's own highlighter off). Off a terminal, without a colour
+    system and under NO_COLOR it is one raw write of the block plus a newline, because rich keeps bold under
+    NO_COLOR and a pipe must carry plain bytes.
+
+    Args:
+        console: The console whose stream receives the block.
+        block: The exact text to write.
     """
-    if console is None:
-        console = Console() if args.print_config else banner_console(args)
-    separator = "=" * 56
-    # console.out: no markup, no highlighting and no wrapping, so the block can be copied as is.
-    console.out("MCP client template:")
-    console.out(separator)
-    console.out(client_config_template(args, secret, created))
-    console.out(separator)
-    if args.type == "http" and args.auth == "bearer" and created:
-        console.out("Use '--print-config' to display the secret again if needed later.")
+    if console.is_terminal and console.color_system is not None and not console.no_color:
+        console.print(JSONHighlighter()(Text(block)), soft_wrap=True, highlight=False, markup=False, emoji=False)
+        return
+    # console.file resolves the current sys.stdout or sys.stderr, so the block lands on the stream of the console.
+    console.file.write(block + "\n")
+    console.file.flush()
+
+
+def _warn_no_auth(args: Namespace) -> None:
+    """Log the no-auth warning for an HTTP start without authentication, naming the config key that allowed it."""
     if args.type == "http" and args.auth == "none":
         # No-auth is reachable only through the 'security.allow_no_auth' config key now, not a CLI --auth none
         # (D-12/D-13); point the operator at the key they set.
@@ -310,6 +401,92 @@ def print_client_config(args: Namespace, secret: str | None, created: bool, cons
             "Authentication is DISABLED (enabled by the 'security.allow_no_auth' config key). "
             "Use only in trusted environments."
         )
+
+
+def print_client_config(args: Namespace, secret: str | None, created: bool) -> None:
+    """Print the client config entry for --print-config, which then exits (always with the full secret).
+
+    --print-config is a CLI output path, so the entry goes to stdout, under the wrapper-style heading
+    "[*] MCP client config:". The JSON entry goes through write_copyable_block: highlighted on a colour terminal, raw
+    elsewhere, byte-identical once colour is removed (D-12, D-29). There are no separator lines and no hint, so
+    nothing but the entry follows the heading and a copy picks up nothing extra.
+    """
+    console = Console(soft_wrap=True)
+    console.print(prefixed_line(logging.INFO, "MCP client config:"))
+    write_copyable_block(console, client_config_template(args, secret, created))
+    _warn_no_auth(args)
+
+
+def print_config_hint(console: Console, args: Namespace) -> None:
+    """Print the line telling an operator the client config can be printed again (D-31).
+
+    The command is styled like the wrapper's usage examples (Command._usages): italic, with the option in
+    bright_blue. The hint names `-p <port>` when the port is not the default, so the command it shows prints the
+    entry of the server that is running.
+
+    Args:
+        console: The console the line goes to.
+        args: The resolved arguments (port).
+    """
+    command = _print_config_command(args)
+    console.print(prefixed_line(logging.INFO, "The MCP client config can be printed any time with: ", command))
+
+
+def _print_config_command(args: Namespace) -> Text:
+    """The `exegol-mcp --print-config` command as the wrapper styles its usage examples, with `-p` off the default."""
+    command = Text.assemble(("exegol-mcp ", "italic"), ("--print-config", "italic bright_blue"))
+    if args.port != DEFAULT_PORT:
+        command.append(f" -p {args.port}", style="italic")
+    return command
+
+
+def print_unshown_secret_hint(args: Namespace, console: Console | None = None) -> None:
+    """Say where the bearer token is, after a start created it but did not bind (GR-IN-01).
+
+    The first-run client config is printed only once the server has bound its port. When that start fails (the port
+    is taken), the secret exists but was never shown, and no later start would print it either (it is no longer
+    "created"), so this line points at --print-config, which prints the entry with the token. The token itself is
+    never in the line (SEC-02). It goes to the standard error stream: a failed start is a diagnostic, not output.
+
+    Args:
+        args: The resolved arguments (port).
+        console: The console to print to; the shared standard error console by default.
+    """
+    console = console or stderr_console()
+    console.print(
+        prefixed_line(
+            logging.WARNING,
+            "The bearer secret was created but not shown, because the server did not start. "
+            "Print the MCP client config with: ",
+            _print_config_command(args),
+        )
+    )
+
+
+def print_startup_client_config(
+    args: Namespace, secret: str | None, created: bool, console: Console | None = None
+) -> None:
+    """Print what a start says about the client config (D-31); stdio prints nothing at all.
+
+    A stdio start returns at once: stdout is the protocol stream (SEC-08) and a client log panel is no place for a
+    token or a hint. An HTTP bearer start that just created the secret prints the entry with the token once, then the
+    hint; every other HTTP start prints only the hint, never the token (SEC-02). A no-auth start logs its warning.
+
+    Args:
+        args: The resolved arguments.
+        secret: The bearer secret, when auth is bearer.
+        created: Whether this start created the secret.
+        console: The console to print to; stdout in HTTP mode by default.
+    """
+    if args.type == "stdio":
+        return
+    console = console or banner_console(args)
+    if args.auth == "bearer" and created:
+        console.print(prefixed_line(logging.INFO, "MCP client config:"))
+        write_copyable_block(console, client_config_template(args, secret, created))
+        console.print()
+    print_config_hint(console, args)
+    _warn_no_auth(args)
 
 
 # --------------- Background update check ---------------
@@ -335,6 +512,14 @@ def _release(version: str) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
     return release, stage
 
 
+def prerelease_stage(version: str) -> str | None:
+    """The PEP 440 pre-release tag of a version: "a", "b" or "rc"; None for a final or unparseable version."""
+    parsed = _release(version)
+    if parsed is None or parsed[1] == (1,):
+        return None
+    return ("a", "b", "rc")[parsed[1][1]]
+
+
 def is_newer(latest: str, current: str) -> bool:
     """True when latest is a strictly higher release than current; False when either cannot be parsed."""
     latest_release, current_release = _release(latest), _release(current)
@@ -355,14 +540,20 @@ class UpdateChecker:
         timeout: float = UPDATE_CHECK_TIMEOUT_SECONDS,
         ttl: float = UPDATE_CACHE_TTL_SECONDS,
         now: Callable[[], float] = time.time,
+        read_only: bool = False,
     ) -> None:
         self.enabled = enabled
+        # The `version` action only looks: it reads the cache without adopting or hardening, never writes it and
+        # leaves the notice to its caller.
+        self._read_only = read_only
         self._current = current
         self._fetch = fetch
         self._timeout = timeout
         self._ttl = ttl
         self._now = now
         self._notice: str | None = None
+        self._latest: str | None = None
+        self._error: str | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
@@ -370,6 +561,16 @@ class UpdateChecker:
     def notice(self) -> str | None:
         """The update notice once the check found a newer release, else None."""
         return self._notice
+
+    @property
+    def latest(self) -> str | None:
+        """The latest release the finished check read from the cache or PyPI, or None (not finished or no answer)."""
+        return self._latest
+
+    @property
+    def error(self) -> str | None:
+        """The class name of the exception that stopped the finished check, or None."""
+        return self._error
 
     def start(self) -> threading.Thread | None:
         """Run the check in a daemon thread and return at once (once per checker; no-op when disabled)."""
@@ -388,23 +589,47 @@ class UpdateChecker:
             latest = self._read_cache()
             if latest is None:
                 latest = self._fetch(self._timeout)
-                if latest:
+                if latest and not self._read_only:
                     self._write_cache(latest)
         except Exception as e:  # noqa: BLE001  # offline, DNS, TLS, proxy, bad JSON: never fail startup
-            _log.debug(f"Update check skipped: {e}")
+            self._error = type(e).__name__
+            _log.log(VERBOSE, f"Update check skipped: {e}")
             return None
-        if latest and is_newer(latest, self._current):
-            self._notice = (
-                f"exegol-mcp {latest} is available (this server runs {self._current}). "
-                "Upgrade it with the tool you installed it with, for example `pipx upgrade exegol-mcp`."
-            )
-            _log.info(self._notice)
+        self._latest = latest
+        notice = self._notice_for(latest) if latest else None
+        if notice is not None:
+            self._notice = notice
+            if not self._read_only:
+                # D-30: an update is one of the warnings a default start shows, in stdio too.
+                _log.warning(notice)
         return self._notice
+
+    def cached_notice(self) -> str | None:
+        """The notice for an already-cached newer release, without any network call. Never raises.
+
+        Returns:
+            The notice, or None when the check is disabled, the cache is absent, stale or unreadable, or the cached
+            release is not newer.
+        """
+        if not self.enabled:
+            return None
+        latest = self._read_cache()  # swallows every read problem as "no cache"
+        return self._notice_for(latest) if latest else None
+
+    def _notice_for(self, latest: str) -> str | None:
+        """The update notice when latest is a newer release than the running one, else None."""
+        if not is_newer(latest, self._current):
+            return None
+        return (
+            f"exegol-mcp {latest} is available (this server runs {self._current}). "
+            "Upgrade it with the tool you installed it with, for example `pipx upgrade exegol-mcp`."
+        )
 
     def _read_cache(self) -> str | None:
         # Same no-follow rules as the bearer secret (CR-01): a refused, missing or garbled cache means "fetch again".
         try:
-            raw = secret_store.read_user_config_file(UPDATE_CACHE_FILE)
+            read = secret_store.peek_user_config_file if self._read_only else secret_store.read_user_config_file
+            raw = read(UPDATE_CACHE_FILE)
             if raw is None:
                 return None
             data = json.loads(raw.decode("utf-8"))
@@ -421,4 +646,4 @@ class UpdateChecker:
         try:
             secret_store.write_user_config_file(UPDATE_CACHE_FILE, payload)
         except (OSError, ValueError) as e:
-            _log.debug(f"Could not cache the update check result: {e}")
+            _log.log(ADVANCED, f"Could not cache the update check result: {e}")

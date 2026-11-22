@@ -33,7 +33,7 @@ _CALLABLE_POINTS: tuple[tuple[str, str], ...] = (
     ("exegol.console.ExegolPrompt", "ExegolRich.Confirm"),
     ("exegol.console.ExegolPrompt", "ExegolRich.Acknowledge"),
     ("exegol.utils.ExeLog", "ExeLog.setCriticalMethod"),
-    # sdk_headless.set_sdk_verbosity at startup, and the SDK's raw output the removal exec mirrors (logger.raw)
+    # sdk_logging.set_verbosity at startup, and the SDK's raw output the removal exec mirrors (logger.raw)
     ("exegol.utils.ExeLog", "ExeLog.setVerbosity"),
     ("exegol.utils.ExeLog", "ExeLog.raw"),
     ("exegol.config.OptionResolver", "OptionResolver.get"),
@@ -180,6 +180,11 @@ _CALLABLE_POINTS: tuple[tuple[str, str], ...] = (
 _ATTRIBUTE_POINTS: tuple[tuple[str, str], ...] = (
     ("exegol.utils.ExeLog", "ExeLog.console"),
     ("exegol.utils.ExeLog", "logger"),
+    # The level numbers bootstrap.logging_setup duplicates because it cannot import the SDK: a renamed constant is a
+    # named refusal here, a renumbered one is caught by the drift test in tests/test_exelog_handler.py.
+    ("exegol.utils.ExeLog", "ExeLog.SUCCESS"),
+    ("exegol.utils.ExeLog", "ExeLog.VERBOSE"),
+    ("exegol.utils.ExeLog", "ExeLog.ADVANCED"),
     ("exegol.config.EnvInfo", "EnvInfo.arch"),
     ("exegol.config.EnvInfo", "EnvInfo.docker_env_names"),
     ("exegol.config.ConstantConfig", "ConstantConfig.exegol_config_path"),
@@ -193,6 +198,16 @@ _ATTRIBUTE_POINTS: tuple[tuple[str, str], ...] = (
     ("exegol.config.ConstantConfig", "ConstantConfig.sentinel_context_path_obj"),
     ("exegol.config.EnvInfo", "EnvInfo.is_windows_shell"),
     ("exegol.config.EnvInfo", "EnvInfo.is_mac_shell"),
+)
+
+# Names only the `version -vvv` debug section reads (adapter/diagnostics.py, D-09). The server never uses them, so a
+# release that renames one must not stop it from starting: assert_patch_points() does not check this list, and the
+# `version` path tolerates a missing name through its per-probe best-effort wrapper ("unknown (AttributeError)").
+# The list exists so the AST coverage test still sees every SDK name exegol-mcp reads, and a drift test can say so.
+_VERSION_ONLY_ATTRIBUTE_POINTS: tuple[tuple[str, str], ...] = (
+    ("exegol.config.ConstantConfig", "ConstantConfig.exegol_config_forced"),
+    ("exegol.config.EnvInfo", "EnvInfo.raw_arch"),
+    ("exegol.config.EnvInfo", "EnvInfo.current_platform"),
 )
 
 # OptionKey members exegol-mcp forces or sets, with the option name each must still map to.

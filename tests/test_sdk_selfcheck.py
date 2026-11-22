@@ -38,6 +38,7 @@ from exegol.utils.LocalDatastore import LocalDatastore
 from exegol.utils.MetaSingleton import MetaSingleton
 
 from exegol_mcp.adapter import sdk_headless, selfcheck
+from exegol_mcp.bootstrap import logging_setup
 
 
 @pytest.fixture
@@ -45,6 +46,7 @@ def sdk_globals(monkeypatch: pytest.MonkeyPatch) -> None:
     """Register an undo for every SDK global patch_exegol_sdk() replaces."""
     monkeypatch.setattr(MetaSingleton, "_MetaSingleton__instances", dict(MetaSingleton._MetaSingleton__instances))
     monkeypatch.setattr(ExeLog, "console", ExeLog.console)
+    monkeypatch.setattr(logging_setup, "_console", logging_setup._console)
     monkeypatch.setattr(logger, "_ExeLog__critical_method", logger._ExeLog__critical_method)
     for handler in logging.getLogger().handlers:
         if hasattr(handler, "console"):
@@ -135,6 +137,7 @@ def test_the_host_shred_patch_step_9_is_idempotent_and_self_checked() -> None:
         (ExeLog, "verbose", "exegol.utils.ExeLog.ExeLog.verbose"),
         (ExeLog, "advanced", "exegol.utils.ExeLog.ExeLog.advanced"),
         (ExeLog, "success", "exegol.utils.ExeLog.ExeLog.success"),
+        (ExeLog, "VERBOSE", "exegol.utils.ExeLog.ExeLog.VERBOSE"),
         # The names the removal mirror's single-hop docker tail reads (patch step 13)
         (_container_module, "DataCache", "exegol.model.ExegolContainer.DataCache"),
         (_container_module, "NotFound", "exegol.model.ExegolContainer.NotFound"),
@@ -289,6 +292,7 @@ def test_a_missing_sdk_import_is_one_named_stderr_line(tmp_path: Path, module: s
     assert len(lines) == 1, result.stderr
     assert expected in lines[0]
     assert "install a supported exegol 6.x release" in lines[0]
+    assert lines[0].startswith("[-] ")
     assert "Traceback" not in result.stderr
 
 
@@ -306,15 +310,15 @@ def test_the_entry_point_defers_every_sdk_import(tmp_path: Path) -> None:
 
 _STDERR_ROUTING_SCRIPT = """
 import logging
-from exegol_mcp.bootstrap.logging_setup import StderrHandler, route_logging_to_stderr
+from exegol_mcp.bootstrap.logging_setup import ExeLogHandler, route_logging_to_stderr
 route_logging_to_stderr(0)
 import exegol.utils.ExeLog
 handlers = logging.getLogger().handlers
-assert len(handlers) == 1 and type(handlers[0]) is StderrHandler, handlers
+assert len(handlers) == 1 and type(handlers[0]) is ExeLogHandler, handlers
 exegol.utils.ExeLog.logger.warning("probe-line")
 route_logging_to_stderr(0)  # idempotent: still exactly one root handler (LIFE-03)
 handlers = logging.getLogger().handlers
-assert len(handlers) == 1 and type(handlers[0]) is StderrHandler, handlers
+assert len(handlers) == 1 and type(handlers[0]) is ExeLogHandler, handlers
 """
 
 
@@ -351,7 +355,12 @@ def _is_sdk_module(name: str) -> bool:
 def test_every_sdk_import_and_class_attribute_is_self_checked() -> None:
     import exegol_mcp
 
-    points = (*selfcheck._CALLABLE_POINTS, *selfcheck._ATTRIBUTE_POINTS, ("exegol.config.OptionResolver", "OptionKey"))
+    points = (
+        *selfcheck._CALLABLE_POINTS,
+        *selfcheck._ATTRIBUTE_POINTS,
+        *selfcheck._VERSION_ONLY_ATTRIBUTE_POINTS,
+        ("exegol.config.OptionResolver", "OptionKey"),
+    )
     option_members = {member for member, _ in selfcheck._OPTION_KEYS}
     # The root logger is a standard logging.Logger instance; a named logger would be an ExeLog once exegol is
     # imported (it sets the logger class), so its ExeLog-only methods would count as standard.
@@ -406,6 +415,30 @@ def test_a_missing_module_level_point_is_named(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(selfcheck.PatchPointError, match=re.escape("exegol.utils.ExeLog.ExeLog")):
         selfcheck.assert_patch_points()
+
+
+def test_version_only_names_are_not_startup_patch_points() -> None:
+    # Review WR-02: a name only `version -vvv` reads must never be able to stop the server from starting.
+    startup = {*selfcheck._CALLABLE_POINTS, *selfcheck._ATTRIBUTE_POINTS}
+    assert selfcheck._VERSION_ONLY_ATTRIBUTE_POINTS
+    assert not startup & set(selfcheck._VERSION_ONLY_ATTRIBUTE_POINTS)
+
+
+@pytest.mark.parametrize(("module_name", "path"), selfcheck._VERSION_ONLY_ATTRIBUTE_POINTS)
+def test_a_renamed_version_only_name_does_not_stop_the_server_from_starting(
+    monkeypatch: pytest.MonkeyPatch, module_name: str, path: str
+) -> None:
+    owner_path, attribute = path.rsplit(".", 1)
+    owner = selfcheck._resolve(module_name, owner_path)
+    monkeypatch.delattr(owner, attribute)
+
+    selfcheck.assert_patch_points()  # does not raise
+
+
+@pytest.mark.parametrize(("module_name", "path"), selfcheck._VERSION_ONLY_ATTRIBUTE_POINTS)
+def test_every_version_only_name_exists_in_the_installed_sdk(module_name: str, path: str) -> None:
+    # The drift alarm for the names `version -vvv` reads: a test failure here, not a refusal to start.
+    selfcheck._resolve(module_name, path)
 
 
 def test_a_renamed_option_key_member_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -543,6 +576,25 @@ def test_a_critical_sdk_error_raises_instead_of_exiting() -> None:
 
     with pytest.raises(RuntimeError, match="docker is busy"):
         logger.critical("docker is busy")
+
+
+@pytest.mark.usefixtures("sdk_globals")
+def test_the_patch_keeps_the_shared_stderr_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    # patch step 1 reuses the process's one stderr console: a second console would diverge from the log handler.
+    root = logging.getLogger()
+    package = logging.getLogger("exegol_mcp")
+    sse = logging.getLogger("sse_starlette")
+    monkeypatch.setattr(root, "handlers", list(root.handlers))
+    monkeypatch.setattr(root, "level", root.level)
+    monkeypatch.setattr(package, "level", package.level)
+    monkeypatch.setattr(sse, "level", sse.level)
+    monkeypatch.setattr(logger, "level", logger.level)
+
+    logging_setup.configure_stderr_logging(0)
+    sdk_headless.patch_exegol_sdk()
+
+    handler = root.handlers[0]
+    assert handler.console is ExeLog.console is logging_setup.stderr_console()  # type: ignore[attr-defined]
 
 
 @pytest.mark.usefixtures("sdk_globals")
