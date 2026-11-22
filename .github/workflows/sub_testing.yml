@@ -1,0 +1,112 @@
+# Pinned GitHub Actions
+# - actions/checkout v6.1.0 @ d23441a48e516b6c34aea4fa41551a30e30af803
+#   - Repo: https://github.com/actions/checkout
+#   - Version: https://github.com/actions/checkout/tree/v6.1.0
+#   - Pinned: https://github.com/actions/checkout/commit/d23441a48e516b6c34aea4fa41551a30e30af803
+# - pdm-project/setup-pdm v4.6 @ 544d7237314ee09c256785bd360f6b30add38b37
+#   - Repo: https://github.com/pdm-project/setup-pdm
+#   - Version: https://github.com/pdm-project/setup-pdm/tree/v4.6
+#   - Pinned: https://github.com/pdm-project/setup-pdm/commit/544d7237314ee09c256785bd360f6b30add38b37
+name: Testing
+
+on:
+  workflow_call:
+
+jobs:
+  testing:
+    name: Code testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: false
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37
+        with:
+          python-version: "3.12"
+      - name: Install requirements
+        run: pdm update && pdm sync -d -G testing
+      - name: Run code analysis (package)
+        run: pdm run -v mypy --check-untyped-defs --pretty # files and overrides come from [tool.mypy] in pyproject.toml
+      - name: Pre-commit checks
+        run: pdm run -v pre-commit run --all-files --hook-stage pre-commit # includes ruff-check
+
+  unit-tests:
+    name: Unit tests (Python ${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: testing
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    env:
+      # D-13: the unit suite is Docker-free. With the runner's daemon out of reach, a test that reaches Docker fails
+      # here instead of passing against the runner's own engine.
+      DOCKER_HOST: unix:///nonexistent/docker.sock
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: false
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37
+        with:
+          python-version: ${{ matrix.version }}
+      - name: Install requirements
+        run: pdm update && pdm sync -d -G testing
+      - name: Refuse live tests
+        # EXEGOL_MCP_LIVE_* variables switch on the live Docker suites, which have no place in CI. grep reads the
+        # whole stream (no -q), so env never takes a SIGPIPE that pipefail would turn into a silent pass.
+        run: |
+          if env | grep '^EXEGOL_MCP_LIVE_' > /dev/null; then
+            echo "Live test variables are set; CI runs the Docker-free suite only:" >&2
+            env | grep '^EXEGOL_MCP_LIVE_' | cut -d= -f1 >&2
+            exit 1
+          fi
+      - name: Run unit tests
+        run: pdm run -v pytest -q
+
+  compatibility:
+    name: Compatibility checks
+    runs-on: ubuntu-latest
+    needs: testing
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: [win32, linux, darwin]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: false
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37
+        with:
+          python-version: ${{ matrix.version }}
+      - name: Install requirements
+        run: pdm update && pdm sync -d -G testing
+      - name: Check python compatibility for ${{ matrix.os }}/${{ matrix.version }}
+        run: pdm run -v mypy exegol_mcp/ --check-untyped-defs --python-version ${{ matrix.version }} --platform ${{ matrix.os }}
+
+  build-n-install:
+    name: Build and install Python 🐍 package 📦
+    runs-on: ubuntu-latest
+    needs: testing
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: false
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37
+        with:
+          python-version: "3.12"
+      - name: Build Exegol MCP
+        run: pdm build
+      - name: Create testing venv
+        run: pdm venv create -n vtest-source --with-pip && pdm venv create -n vtest-wheel --with-pip
+      - name: Install pip source package
+        run: pdm run --venv vtest-source -v pip install ./dist/*.tar.gz
+      - name: Install pip wheel package
+        run: pdm run --venv vtest-wheel -v pip install ./dist/*.whl
+      - name: Smoke test
+        # argparse prints the help and exits before any Exegol SDK or Docker use.
+        run: pdm run --venv vtest-source exegol-mcp --help && pdm run --venv vtest-wheel exegol-mcp --help

@@ -1,0 +1,57 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+default_install_hook_types: [ pre-commit, pre-push ]
+exclude: '^\.planning/'  # Planning evidence files are records, never rewritten by hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '^LICENSE\.md$'  # The licence text stays byte-identical
+      - id: end-of-file-fixer
+        exclude: '^LICENSE\.md$'  # The licence text stays byte-identical
+      - id: check-yaml
+      - id: check-toml
+      - id: check-shebang-scripts-are-executable
+      - id: check-case-conflict
+      - id: name-tests-test
+        args:
+          - --pytest-test-first  # Enforce test_*.py naming (project convention, matches pytest python_files)
+        exclude: '^tests/(fakes|fake_server|http_harness)\.py$'  # Shared test helpers, not test modules
+      - id: check-illegal-windows-names
+      - id: mixed-line-ending
+        args:
+          - --fix=lf
+      - id: check-added-large-files
+        args:
+          - --maxkb=200  # Max 200kb file can be added
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+      - id: python-no-eval
+      - id: python-use-type-annotations
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5
+    hooks:
+      - id: ruff-check  # Lint only: the formatter stays out so the v2 diff is not reformatted wholesale (D-10)
+  - repo: local
+    hooks:
+      # The project's own mypy, run against [tool.mypy] in pyproject.toml. The wrapper's mirrors-mypy hook runs in an
+      # isolated environment without mcp, pydantic and exegol, so it would type-check those imports as Any.
+      # The git hook runs with the user's shell PATH and neither PDM nor uv activates .venv, so the launcher below
+      # finds the project environment itself: the .venv mypy, else `pdm run mypy`, else `uv run mypy`. language python
+      # starts it with pre-commit's own interpreter on every OS; the hook environment needs no dependency.
+      - id: mypy
+        name: mypy
+        entry: python scripts/run_mypy.py
+        language: python
+        pass_filenames: false
+        types: [python]
+        args:
+          - --check-untyped-defs
+          - --pretty
+        stages: [pre-push]

@@ -1,0 +1,37 @@
+name: Ext. PR tests & int. branches pushes
+
+# for external contribution pull requests,
+#  and internal pushes to specific branches (!= dev)
+
+on:
+  pull_request:
+    branches-ignore:
+      - "main"
+    paths-ignore: # not always respected. See https://github.com/actions/runner/issues/2324#issuecomment-1703345084
+      - ".github/**"
+      - "**.md"
+  push:
+    branches-ignore:
+      - "dev"
+      - "main"
+    paths-ignore:
+      - ".github/**"
+      - "**.md"
+
+# todo add whitelist paths like entrypoint_nightly.yml
+
+# creating a separate concurrency group for each PR
+# so that our "PR checks" are always running for the latest commit in the PR
+# and as PRs are updated we want to make sure "in progress" jobs are killed so we don't waste resources
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+# Test jobs run third-party tooling on untrusted PR code and need no write token.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python tests and checks
+    uses: ./.github/workflows/sub_testing.yml

@@ -17,15 +17,20 @@ keywords = ["exegol", "mcp", "ctf", "ai", "llm"]
 
 requires-python = ">=3.10"
 dependencies = [
-    "exegol~=5.1.13",
-    "mcp~=1.30.0",
+    "exegol>=6.0.2,<7",
+    "mcp>=2.3,<3",
+    # config.yml is parsed directly with yaml.safe_load (CONF-03/CONF-04); already present transitively via exegol.
+    "PyYAML>=6.0.3",
+    # The CLI's log handler, console and banner are built on rich directly (D-21); already present transitively via
+    # exegol, whose own pin is rich~=14.2.0.
+    "rich>=14.2,<15",
     # Use OS keyring only on Windows and macOS to avoid extra deps on Linux
     "keyring>=24; platform_system == 'Windows' or platform_system == 'Darwin'",
 ]
 
 [project.urls]
 Homepage = "https://exegol.com"
-Documentation = "https://docs.exegol.com/mcp/features"
+Documentation = "https://docs.exegol.com/mcp/"
 Repository = "https://github.com/ThePorgs/Exegol-MCP"
 Issues = "https://github.com/ThePorgs/Exegol-MCP/issues"
 
@@ -34,19 +39,41 @@ exegol-mcp = "exegol_mcp.main:main"
 
 [dependency-groups]
 dev = [
+    { include-group = "testing" },
+    "pre-commit",
+]
+testing = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-timeout>=2.4.0",
     "asgi-lifespan>=2.1.0",
-    "exegol @ git+https://github.com/ThePorgs/Exegol.git@dev",
+    "ruff>=0.17",
+    "mypy>=2.4",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Per-test timeout (D-14): the slowest test takes about 3 s on Linux, so 120 s clears slow CI runners by a wide
+# margin while a hang regression still fails with a traceback instead of stalling the run.
+timeout = 120
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.mypy]
+python_version = "3.10"
+files = ["exegol_mcp"]
+
+[[tool.mypy.overrides]]
+module = ["exegol.*", "docker.*", "yaml"]
+ignore_missing_imports = true
 
 [tool.pdm]
 [tool.pdm.version]
 source = "file"
-path = "exegol_mcp/main.py"
+path = "exegol_mcp/__init__.py"
 
 [tool.pdm.build]
 excludes = ["tests"]
