@@ -52,9 +52,11 @@ def _field(row: dict[str, str | None], *keys: str) -> str | None:
 def parse_installed_tools(csv_text: str) -> list[InstalledTool]:
     """Parse the text of an installed_tools.csv into InstalledTool items, in file order.
 
-    Pure: no I/O. Header variants (name/Tool/tool, Version, Category, Description) are accepted, two rows with the
-    same tool name are both kept, and a short row yields a tool whose missing fields are None instead of raising.
-    An empty text, or a header with no row, gives an empty list.
+    Pure: no I/O. The header Exegol images write is Tool,Version,Link,Description (older and free images write
+    Tool,Link,Description). Accepted header variants are name/Tool/tool, version/Version, link/Link/url/URL and
+    description/Description. A column the CSV does not have, or a short row, gives a None field instead of
+    raising. Two rows with the same tool name are both kept, in file order. An empty text, or a header with no
+    row, gives an empty list.
 
     Args:
         csv_text: The whole CSV text, header line first.
@@ -68,7 +70,7 @@ def parse_installed_tools(csv_text: str) -> list[InstalledTool]:
             InstalledTool(
                 name=_field(row, "name", "Tool", "tool") or "",
                 version=_field(row, "version", "Version"),
-                category=_field(row, "category", "Category"),
+                link=_field(row, "link", "Link", "url", "URL"),
                 description=_field(row, "description", "Description"),
             )
         )

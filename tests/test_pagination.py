@@ -17,8 +17,8 @@ from tests.fakes import FakeExegolAdapter
 
 
 def _large_csv(count: int) -> str:
-    header = "name,version,category,description\n"
-    rows = "".join(f"tool{i},1.{i},cat{i % 3},desc{i}\n" for i in range(count))
+    header = "Tool,Version,Link,Description\n"
+    rows = "".join(f"tool{i},1.{i},https://example.com/tool{i},desc{i}\n" for i in range(count))
     return header + rows
 
 

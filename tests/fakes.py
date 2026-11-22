@@ -581,7 +581,7 @@ MINIMAL_TOOL_ARGUMENTS: dict[str, dict[str, object]] = {
     "list_directory": {"container_name": "exegol-lab", "path": "/etc"},
 }
 
-INSTALLED_TOOLS_CSV = "name,version,category,description\nnmap,7.94,network,Network scanner\n"
+INSTALLED_TOOLS_CSV = "Tool,Version,Link,Description\nnmap,7.94,https://nmap.org,Network scanner\n"
 
 
 def catalog_router(command: str) -> ExecResult | None:

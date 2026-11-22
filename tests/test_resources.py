@@ -449,7 +449,7 @@ async def test_list_is_identical_in_both_eras() -> None:
 # --- The installed-tools catalog resource (RES-02) -------------------------------------------------------------------
 
 
-_CATALOG_HEADER = "name,version,category,description\n"
+_CATALOG_HEADER = "Tool,Version,Link,Description\n"
 
 
 def _catalog_adapter(csv_text: str, **kwargs: Any) -> FakeExegolAdapter:
@@ -462,7 +462,7 @@ def _catalog_adapter(csv_text: str, **kwargs: Any) -> FakeExegolAdapter:
 
 
 def _large_catalog(count: int) -> str:
-    return _CATALOG_HEADER + "".join(f"tool{i},1.{i},cat{i % 3},desc{i}\n" for i in range(count))
+    return _CATALOG_HEADER + "".join(f"tool{i},1.{i},https://example.com/tool{i},desc{i}\n" for i in range(count))
 
 
 async def _read_tools(client: Client, uri: str = _TOOLS_URI) -> Any:
@@ -500,7 +500,7 @@ async def test_tools_read_returns_the_whole_catalog_as_json(mode: str) -> None:
     async with Client(_server(adapter=adapter), mode=mode) as client:
         data = await _read_tools(client)
     assert data == {
-        "tools": [{"name": "nmap", "version": "7.94", "category": "network", "description": "Network scanner"}]
+        "tools": [{"name": "nmap", "version": "7.94", "link": "https://nmap.org", "description": "Network scanner"}]
     }
 
 
@@ -536,7 +536,7 @@ async def test_tools_read_of_an_empty_catalog_is_an_empty_list(mode: str, csv_te
 
 @pytest.mark.parametrize("mode", list(ERAS))
 async def test_tools_read_keeps_short_rows_and_duplicates_in_file_order(mode: str) -> None:
-    csv_text = _CATALOG_HEADER + "nmap,7.94,network,scan\nshort\nnmap,7.95,network,scan\n"
+    csv_text = _CATALOG_HEADER + "nmap,7.94,https://nmap.org,scan\nshort\nnmap,7.95,https://nmap.org,scan\n"
     async with Client(_server(adapter=_catalog_adapter(csv_text)), mode=mode) as client:
         data = await _read_tools(client)
     assert [(t["name"], t["version"]) for t in data["tools"]] == [("nmap", "7.94"), ("short", None), ("nmap", "7.95")]

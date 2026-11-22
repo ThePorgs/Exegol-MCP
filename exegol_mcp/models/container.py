@@ -32,5 +32,8 @@ class InstalledTool(BaseModel):
 
     name: str = Field(description="Name of the tool")
     version: str | None = Field(default=None, description="Installed tool version when recorded")
-    category: str | None = Field(default=None, description="Category of the tool")
+    link: str | None = Field(
+        default=None,
+        description="Upstream URL of the tool (its project page or repository) when the catalog records it",
+    )
     description: str | None = Field(default=None, description="Description of the tool")

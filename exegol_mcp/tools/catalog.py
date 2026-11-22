@@ -45,9 +45,9 @@ async def list_installed_tools(
         cursor: The next_cursor from a previous call, to fetch the next page. Omit for the first page.
 
     Returns:
-        A page: items is one page of installed tools (name, version, category, description; fields the CSV does
-        not record are null), and next_cursor is the cursor for the next page or null on the last page. An empty
-        items list with a null next_cursor means the catalog file is empty.
+        A page: items is one page of installed tools, each with its name, version, link and description (null when
+        the CSV does not record them), and next_cursor is the cursor for the next page or null on the last page. An
+        empty items list with a null next_cursor means the catalog file is empty.
     """
     adapter = ctx.request_context.lifespan_context
     page_size = _page_size(adapter)

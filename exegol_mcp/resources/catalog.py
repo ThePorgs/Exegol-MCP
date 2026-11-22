@@ -18,7 +18,7 @@ async def installed_tools(name: str, *, ctx: Context[ExegolPort, Any]) -> str:
     """The whole catalog of tools installed in one Exegol container, as JSON, in a single read.
 
     The JSON object is {"tools": [...]}: every tool listed in the container's /.exegol/installed_tools.csv, in file
-    order, each with its name, version, category and description (null when the catalog does not record it). The
+    order, each with its name, version, link and description (null when the CSV does not record them). The
     list is never paged and never filtered. An empty catalog reads as {"tools": []}.
 
     IMPORTANT: The container must be running. Reading this resource never starts, stops or changes a container: a

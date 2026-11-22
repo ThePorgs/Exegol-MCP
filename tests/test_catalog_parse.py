@@ -3,20 +3,28 @@
 import shlex
 
 import pytest
+from mcp import Client
 
+from exegol_mcp.app import build_server
+from exegol_mcp.models.container import InstalledTool
 from exegol_mcp.models.exec import ExecResult
+from exegol_mcp.resources import INSTALLED_TOOLS_URI
 from exegol_mcp.services import catalog as catalog_service
 from tests.fakes import FakeExegolAdapter
 
+# The header Exegol images write: Tool,Version,Link,Description.
 NORMAL_CSV = (
-    "name,version,category,description\n"
-    "nmap,7.94,network,Network scanner\n"
-    "nmap,7.95,network,Newer network scanner\n"
-    "crackmapexec,5.4,ad,Swiss army knife\n"
+    "Tool,Version,Link,Description\n"
+    "nmap,7.94,https://nmap.org,Network scanner\n"
+    "nmap,7.95,https://nmap.org,Newer network scanner\n"
+    "crackmapexec,5.4,https://github.com/byt3bl33d3r/CrackMapExec,Swiss army knife\n"
 )
 
+# Older and free images write no Version column: Tool,Link,Description.
+FREE_IMAGE_CSV = "Tool,Link,Description\nnmap,https://nmap.org,Network scanner\n"
+
 # Rows with fewer fields than the header: csv.DictReader fills the rest with None (the v1 crash trigger).
-SHORT_ROW_CSV = "name,version,category,description\nnmap,7.94\nhydra\n"
+SHORT_ROW_CSV = "Tool,Version,Link,Description\nnmap,7.94\nhydra\n"
 
 
 def _csv_adapter(csv_text: str) -> FakeExegolAdapter:
@@ -37,7 +45,7 @@ async def test_list_installed_tools_parses_a_normal_csv() -> None:
     tools = (await catalog_service.list_installed_tools(_csv_adapter(NORMAL_CSV), "exegol-lab")).items
     assert [t.name for t in tools] == ["nmap", "nmap", "crackmapexec"]
     assert tools[0].version == "7.94"
-    assert tools[0].category == "network"
+    assert tools[0].link == "https://nmap.org"
     assert tools[0].description == "Network scanner"
 
 
@@ -59,10 +67,36 @@ async def test_list_installed_tools_does_not_crash_on_short_rows() -> None:
     tools = (await catalog_service.list_installed_tools(_csv_adapter(SHORT_ROW_CSV), "exegol-lab")).items
     assert [t.name for t in tools] == ["nmap", "hydra"]
     assert tools[0].version == "7.94"
-    assert tools[0].category is None
+    assert tools[0].link is None
     assert tools[0].description is None
     assert tools[1].version is None
-    assert tools[1].category is None
+    assert tools[1].link is None
+    assert tools[1].description is None
+
+
+async def test_list_installed_tools_parses_a_free_image_csv_without_a_version_column() -> None:
+    tools = (await catalog_service.list_installed_tools(_csv_adapter(FREE_IMAGE_CSV), "exegol-lab")).items
+    assert [t.name for t in tools] == ["nmap"]
+    assert tools[0].version is None
+    assert tools[0].link == "https://nmap.org"
+    assert tools[0].description == "Network scanner"
+
+
+@pytest.mark.parametrize("link_header", ["Link", "link", "URL", "url"])
+def test_parse_installed_tools_reads_the_link_from_any_header_variant(link_header: str) -> None:
+    tools = catalog_service.parse_installed_tools(
+        f"Tool,Version,{link_header},Description\nnmap,7.94,https://nmap.org,Network scanner\n"
+    )
+    assert [(t.name, t.version, t.link, t.description) for t in tools] == [
+        ("nmap", "7.94", "https://nmap.org", "Network scanner")
+    ]
+
+
+def test_installed_tool_has_exactly_the_four_catalog_keys() -> None:
+    expected = {"name", "version", "link", "description"}
+    assert set(InstalledTool.model_fields) == expected
+    (tool,) = catalog_service.parse_installed_tools(NORMAL_CSV)[:1]
+    assert set(tool.model_dump(mode="json")) == expected
 
 
 async def test_list_installed_tools_unknown_container_raises_value_error() -> None:
@@ -161,3 +195,35 @@ async def test_list_offline_resources_runs_the_verbatim_find_and_splits_lines() 
     assert resources == ["/opt/resources/linux/a", "/opt/resources/linux/b"]
     assert captured[0].startswith("find /opt/resources/windows -type f")
     assert "LICEN[SC]E" in captured[0]
+
+
+# --- The catalog contract served to the model ------------------------------------------------------------------------
+
+_FIELDS_PHRASE = "name, version, link and description (null when the CSV does not record them)"
+
+
+async def test_served_list_installed_tools_description_names_the_real_fields() -> None:
+    async with Client(build_server(None, FakeExegolAdapter())) as client:
+        tools = (await client.list_tools()).tools
+    (tool,) = [t for t in tools if t.name == "list_installed_tools"]
+    assert _FIELDS_PHRASE in " ".join((tool.description or "").split())
+
+
+async def test_served_installed_tools_template_description_names_the_real_fields() -> None:
+    async with Client(build_server(None, FakeExegolAdapter())) as client:
+        templates = (await client.list_resource_templates()).resource_templates
+    (template,) = [t for t in templates if t.uri_template == INSTALLED_TOOLS_URI]
+    assert _FIELDS_PHRASE in " ".join((template.description or "").split())
+
+
+async def test_served_list_installed_tools_output_schema_has_exactly_the_four_keys() -> None:
+    async with Client(build_server(None, FakeExegolAdapter())) as client:
+        tools = (await client.list_tools()).tools
+    (tool,) = [t for t in tools if t.name == "list_installed_tools"]
+    assert tool.output_schema is not None
+    assert set(tool.output_schema["$defs"]["InstalledTool"]["properties"]) == {
+        "name",
+        "version",
+        "link",
+        "description",
+    }
